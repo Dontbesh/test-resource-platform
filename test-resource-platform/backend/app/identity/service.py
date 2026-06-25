@@ -24,6 +24,21 @@ def get_user_by_id(session: Session, user_id: int) -> User | None:
     return session.get(User, user_id)
 
 
+def list_users(session: Session) -> list[User]:
+    return list(session.scalars(select(User).order_by(User.id)))
+
+
+def disable_user(session: Session, user: User) -> User:
+    user.is_active = False
+    session.flush()
+    return user
+
+
+def reset_user_password(session: Session, user: User, password: str) -> None:
+    user.password_hash = hash_password(password)
+    session.flush()
+
+
 def authenticate_user(session: Session, username: str, password: str) -> User | None:
     user = get_user_by_username(session, username)
     if not user or not user.is_active:

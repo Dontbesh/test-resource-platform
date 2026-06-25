@@ -1,3 +1,5 @@
+import { ensureSuccess, parseResponse } from '@/api/http';
+
 export type UserRole = 'ADMIN' | 'TSE' | 'TE';
 
 export type UserPublic = {
@@ -11,15 +13,6 @@ export type LoginRequest = {
   username: string;
   password: string;
 };
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    const message = body?.detail?.message ?? `Request failed: ${response.status}`;
-    throw new Error(message);
-  }
-  return response.json() as Promise<T>;
-}
 
 export async function login(body: LoginRequest): Promise<UserPublic> {
   const response = await fetch('/api/v1/auth/login', {
@@ -45,7 +38,5 @@ export async function logout(): Promise<void> {
     method: 'POST',
     credentials: 'include'
   });
-  if (!response.ok) {
-    throw new Error(`Logout failed: ${response.status}`);
-  }
+  await ensureSuccess(response);
 }

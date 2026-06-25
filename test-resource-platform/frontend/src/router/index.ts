@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import DashboardView from '@/views/DashboardView.vue';
 import HealthView from '@/views/HealthView.vue';
 import LoginView from '@/views/LoginView.vue';
+import UserManagementView from '@/views/UserManagementView.vue';
 import { useAuthStore } from '@/stores/auth';
 
 const router = createRouter({
@@ -17,6 +18,12 @@ const router = createRouter({
       name: 'dashboard',
       component: DashboardView,
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/users',
+      name: 'users',
+      component: UserManagementView,
+      meta: { requiresAuth: true, roles: ['ADMIN'] }
     },
     {
       path: '/login',
@@ -37,6 +44,11 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } };
+  }
+
+  const allowedRoles = to.meta.roles as string[] | undefined;
+  if (allowedRoles && (!auth.user || !allowedRoles.includes(auth.user.role))) {
+    return { name: 'dashboard' };
   }
 
   if (to.name === 'login' && auth.isAuthenticated) {

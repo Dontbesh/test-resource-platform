@@ -7,6 +7,12 @@
           <h1>后台首页</h1>
         </div>
         <n-space align="center">
+          <n-button v-if="auth.user?.role === 'ADMIN'" secondary @click="router.push('/users')">
+            <template #icon>
+              <n-icon><People24Regular /></n-icon>
+            </template>
+            用户管理
+          </n-button>
           <n-tag type="info">{{ auth.user?.role }}</n-tag>
           <span>{{ auth.user?.username }}</span>
           <n-button secondary @click="handleLogout">登出</n-button>
@@ -21,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import { People24Regular } from '@vicons/fluent';
 import { useRouter } from 'vue-router';
 
 import { useAuthStore } from '@/stores/auth';
