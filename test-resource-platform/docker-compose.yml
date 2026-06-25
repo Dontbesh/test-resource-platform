@@ -18,6 +18,8 @@ services:
   api:
     build:
       context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
     environment:
       APP_NAME: ${APP_NAME:-Test Resource Platform}
       APP_VERSION: ${APP_VERSION:-0.1.0}
@@ -37,6 +39,8 @@ services:
   web:
     build:
       context: ./frontend
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
     ports:
