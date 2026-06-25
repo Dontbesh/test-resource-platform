@@ -1,6 +1,6 @@
 # 一期工程骨架与首个端到端 Tracer
 
-Status: ready-for-audit
+Status: complete
 
 Date: 2026-06-23
 
@@ -114,8 +114,9 @@ docker compose up --build
 - 后端 ruff 检查通过。
 - 前端类型检查通过。
 - 前端生产构建通过；Vite 提示首包 chunk 大于 500 kB，骨架阶段暂不拆包。
-- Docker Compose 文件已创建，但当前机器无法运行 Docker 命令验证。
-- 独立 Audit 已尝试，但审查代理因连接中断失败，尚未完成 Caesar Audit。
+- Docker Compose 文件已创建。
+- 2026-06-25 已在实验室 Linux 服务器 clone 项目并成功启动，前端页面可正常显示健康检查信息。
+- 独立 Audit 已完成：无 P0/P1；P2 为 README 缺少 Linux / `docker-compose` 兼容命令，已补充。
 
 ## Open Questions
 

@@ -22,6 +22,12 @@ services:
       APP_NAME: ${APP_NAME:-Test Resource Platform}
       APP_VERSION: ${APP_VERSION:-0.1.0}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/test_resource_platform}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:-change-this-before-production}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-trp_session}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-28800}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-Admin@123456}
     ports:
       - "8000:8000"
     depends_on:

@@ -1,19 +1,14 @@
 from dataclasses import dataclass
-from functools import lru_cache
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import text
+
+from app.db.session import get_engine
 
 
 @dataclass(frozen=True)
 class DatabaseCheckResult:
     status: str
     error: str | None = None
-
-
-@lru_cache
-def get_engine(database_url: str) -> Engine:
-    return create_engine(database_url, pool_pre_ping=True)
 
 
 def check_database(database_url: str) -> DatabaseCheckResult:
