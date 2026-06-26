@@ -98,6 +98,19 @@ def list_user_leases(
     )
 
 
+def list_active_machine_users(
+    session: Session,
+    now: datetime | None = None,
+) -> dict[int, str]:
+    expire_overdue_leases(session, now or datetime.now(UTC))
+    active_leases = session.scalars(
+        select(ResourceLease)
+        .options(joinedload(ResourceLease.user))
+        .where(ResourceLease.status == LeaseStatus.ACTIVE)
+    )
+    return {lease.machine_id: lease.user.username for lease in active_leases}
+
+
 def release_resource_lease(
     session: Session,
     lease_id: str,

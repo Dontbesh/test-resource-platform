@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from app.auth.authorization import require_roles
 from app.auth.dependencies import get_current_user, get_db
 from app.identity.models import User, UserRole
+from app.leases.service import list_active_machine_users
 from app.resources.models import MachineResource, ResourceAdminStatus, ResourcePool
 from app.resources.schemas import (
+    MachineOccupancyStatus,
     MachineResourceCreateRequest,
     MachineResourcePublic,
     ResourcePoolCreateRequest,
@@ -63,8 +65,22 @@ def create_pool(
 def list_machines(
     _: Annotated[User, Depends(get_current_user)],
     session: Annotated[Session, Depends(get_db)],
-) -> list[MachineResource]:
-    return list_machine_resources(session)
+) -> list[MachineResourcePublic]:
+    active_machine_users = list_active_machine_users(session)
+    machines = []
+    for machine in list_machine_resources(session):
+        leased_by_username = active_machine_users.get(machine.id)
+        machine_public = MachineResourcePublic.model_validate(machine)
+        if leased_by_username is not None:
+            machine_public = machine_public.model_copy(
+                update={
+                    "occupancy_status": MachineOccupancyStatus.OCCUPIED,
+                    "leased_by_username": leased_by_username,
+                }
+            )
+        machines.append(machine_public)
+    session.commit()
+    return machines
 
 
 @router.post("/machines", response_model=MachineResourcePublic, status_code=status.HTTP_201_CREATED)

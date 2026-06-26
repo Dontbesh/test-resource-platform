@@ -1,8 +1,14 @@
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 from app.resources.models import ConnectivityStatus, ResourceAdminStatus, ResourceType
+
+
+class MachineOccupancyStatus(StrEnum):
+    FREE = "FREE"
+    OCCUPIED = "OCCUPIED"
 
 
 class ResourcePoolCreateRequest(BaseModel):
@@ -58,6 +64,8 @@ class MachineResourcePublic(BaseModel):
     mac_address: str | None
     bmc_address: str | None
     tags: list[str]
+    occupancy_status: MachineOccupancyStatus = MachineOccupancyStatus.FREE
+    leased_by_username: str | None = None
     created_at: datetime
     updated_at: datetime
 

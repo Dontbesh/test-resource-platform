@@ -128,6 +128,28 @@ def test_active_lease_blocks_second_lease_for_same_machine(client: TestClient) -
     assert conflict_response.json()["detail"]["error_code"] == "RESOURCE_ALREADY_LEASED"
 
 
+def test_machine_list_shows_occupancy_status_and_lease_user(client: TestClient) -> None:
+    login(client, "admin", "Admin@123456")
+    create_user(client, "te-occupant", "TeOccupant@123456", "TE")
+    create_user(client, "te-viewer", "TeViewer@123456", "TE")
+    create_pool_and_machine(client, "SN-PHY-LEASE-008")
+    create_pool_and_machine(client, "SN-PHY-LEASE-009")
+    client.post("/api/v1/auth/logout")
+    login(client, "te-occupant", "TeOccupant@123456")
+    create_lease(client, "SN-PHY-LEASE-008")
+    client.post("/api/v1/auth/logout")
+    login(client, "te-viewer", "TeViewer@123456")
+
+    machines_response = client.get("/api/v1/machines")
+
+    assert machines_response.status_code == 200
+    machines = {machine["resource_code"]: machine for machine in machines_response.json()}
+    assert machines["SN-PHY-LEASE-008"]["occupancy_status"] == "OCCUPIED"
+    assert machines["SN-PHY-LEASE-008"]["leased_by_username"] == "te-occupant"
+    assert machines["SN-PHY-LEASE-009"]["occupancy_status"] == "FREE"
+    assert machines["SN-PHY-LEASE-009"]["leased_by_username"] is None
+
+
 def test_disabled_pool_or_machine_cannot_be_leased(client: TestClient) -> None:
     login(client, "admin", "Admin@123456")
     create_user(client, "te-disabled", "TeDisabled@123456", "TE")

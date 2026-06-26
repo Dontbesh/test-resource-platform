@@ -3,6 +3,7 @@ import { parseResponse } from '@/api/http';
 export type ResourceType = 'PHYSICAL' | 'VIRTUAL';
 export type ResourceAdminStatus = 'ACTIVE' | 'MAINTENANCE' | 'DISABLED';
 export type ConnectivityStatus = 'UNKNOWN' | 'REACHABLE' | 'UNREACHABLE';
+export type MachineOccupancyStatus = 'FREE' | 'OCCUPIED';
 
 export type ResourcePoolPublic = {
   id: number;
@@ -39,6 +40,8 @@ export type MachineResourcePublic = {
   mac_address: string | null;
   bmc_address: string | null;
   tags: string[];
+  occupancy_status: MachineOccupancyStatus;
+  leased_by_username: string | null;
   created_at: string;
   updated_at: string;
 };

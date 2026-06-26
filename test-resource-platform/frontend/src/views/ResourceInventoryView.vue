@@ -304,6 +304,26 @@ const machineColumns: DataTableColumns<MachineResourcePublic> = [
       );
     }
   },
+  {
+    title: '占用状态',
+    key: 'occupancy_status',
+    width: 110,
+    render(row) {
+      return h(
+        NTag,
+        { type: row.occupancy_status === 'OCCUPIED' ? 'warning' : 'success' },
+        { default: () => (row.occupancy_status === 'OCCUPIED' ? '已占用' : '空闲') }
+      );
+    }
+  },
+  {
+    title: '使用人',
+    key: 'leased_by_username',
+    width: 120,
+    render(row) {
+      return row.leased_by_username ?? '-';
+    }
+  },
   { title: 'IP', key: 'ip_address' },
   {
     title: '标签',
@@ -401,7 +421,7 @@ const leaseColumns: DataTableColumns<ResourceLeasePublic> = [
 ];
 
 function renderLeaseButton(machine: MachineResourcePublic) {
-  const disabled = !isMachineLeasable(machine) || hasActiveLeaseForMachine(machine.resource_code);
+  const disabled = !isMachineLeasable(machine) || machine.occupancy_status === 'OCCUPIED';
   return h(
     NButton,
     {
@@ -413,7 +433,7 @@ function renderLeaseButton(machine: MachineResourcePublic) {
     },
     {
       icon: () => h(NIcon, null, { default: () => h(PlayCircle24Regular) }),
-      default: () => (hasActiveLeaseForMachine(machine.resource_code) ? '已占用' : '占用')
+      default: () => (machine.occupancy_status === 'OCCUPIED' ? '已占用' : '占用')
     }
   );
 }
@@ -491,12 +511,6 @@ function isMachinePoolDisabled(machine: MachineResourcePublic) {
 
 function isMachineLeasable(machine: MachineResourcePublic) {
   return machine.admin_status === 'ACTIVE' && !isMachinePoolDisabled(machine);
-}
-
-function hasActiveLeaseForMachine(resourceCode: string) {
-  return leases.value.some(
-    (lease) => lease.status === 'ACTIVE' && lease.machine.resource_code === resourceCode
-  );
 }
 
 function formatDateTime(value: string) {
