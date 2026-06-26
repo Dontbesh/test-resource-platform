@@ -18,6 +18,7 @@ class ResourcePoolPublic(BaseModel):
     description: str | None
     location: str | None
     network_zone: str | None
+    is_active: bool
     created_at: datetime
     updated_at: datetime
 

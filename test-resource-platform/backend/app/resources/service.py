@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.resources.models import MachineResource, ResourcePool
+from app.resources.models import MachineResource, ResourceAdminStatus, ResourcePool
 from app.resources.schemas import MachineResourceCreateRequest, ResourcePoolCreateRequest
 
 
@@ -29,6 +29,12 @@ def create_resource_pool(session: Session, body: ResourcePoolCreateRequest) -> R
     return pool
 
 
+def set_resource_pool_active(session: Session, pool: ResourcePool, is_active: bool) -> ResourcePool:
+    pool.is_active = is_active
+    session.flush()
+    return pool
+
+
 def list_machine_resources(session: Session) -> list[MachineResource]:
     return list(session.scalars(select(MachineResource).order_by(MachineResource.id)))
 
@@ -37,6 +43,16 @@ def get_machine_by_resource_code(session: Session, resource_code: str) -> Machin
     return session.scalar(
         select(MachineResource).where(MachineResource.resource_code == resource_code)
     )
+
+
+def set_machine_admin_status(
+    session: Session,
+    machine: MachineResource,
+    status: ResourceAdminStatus,
+) -> MachineResource:
+    machine.admin_status = status
+    session.flush()
+    return machine
 
 
 def create_machine_resource(

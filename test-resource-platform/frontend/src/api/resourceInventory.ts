@@ -10,6 +10,7 @@ export type ResourcePoolPublic = {
   description: string | null;
   location: string | null;
   network_zone: string | null;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -79,6 +80,22 @@ export async function createResourcePool(
   return parseResponse<ResourcePoolPublic>(response);
 }
 
+export async function disableResourcePool(poolId: number): Promise<ResourcePoolPublic> {
+  const response = await fetch(`/api/v1/resource-pools/${poolId}/disable`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<ResourcePoolPublic>(response);
+}
+
+export async function enableResourcePool(poolId: number): Promise<ResourcePoolPublic> {
+  const response = await fetch(`/api/v1/resource-pools/${poolId}/enable`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<ResourcePoolPublic>(response);
+}
+
 export async function listMachines(): Promise<MachineResourcePublic[]> {
   const response = await fetch('/api/v1/machines', {
     credentials: 'include'
@@ -96,6 +113,22 @@ export async function createMachine(
     },
     credentials: 'include',
     body: JSON.stringify(body)
+  });
+  return parseResponse<MachineResourcePublic>(response);
+}
+
+export async function disableMachine(resourceCode: string): Promise<MachineResourcePublic> {
+  const response = await fetch(`/api/v1/machines/${resourceCode}/disable`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<MachineResourcePublic>(response);
+}
+
+export async function enableMachine(resourceCode: string): Promise<MachineResourcePublic> {
+  const response = await fetch(`/api/v1/machines/${resourceCode}/enable`, {
+    method: 'POST',
+    credentials: 'include'
   });
   return parseResponse<MachineResourcePublic>(response);
 }

@@ -114,17 +114,23 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
-import { NTag, useMessage, type DataTableColumns } from 'naive-ui';
+import { NButton, NIcon, NPopconfirm, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui';
 import {
   ArrowLeft24Regular,
   Database24Regular,
-  Desktop24Regular
+  Desktop24Regular,
+  DismissCircle24Regular,
+  PlayCircle24Regular
 } from '@vicons/fluent';
 import { useRouter } from 'vue-router';
 
 import {
   createMachine,
   createResourcePool,
+  disableMachine,
+  disableResourcePool,
+  enableMachine,
+  enableResourcePool,
   listMachines,
   listResourcePools,
   type MachineResourcePublic,
@@ -179,7 +185,35 @@ const poolColumns: DataTableColumns<ResourcePoolPublic> = [
   { title: 'ID', key: 'id', width: 80 },
   { title: '名称', key: 'name' },
   { title: '网络区域', key: 'network_zone' },
-  { title: '说明', key: 'description' }
+  { title: '说明', key: 'description' },
+  {
+    title: '状态',
+    key: 'is_active',
+    width: 110,
+    render(row) {
+      return h(
+        NTag,
+        { type: row.is_active ? 'success' : 'error' },
+        { default: () => (row.is_active ? '启用' : '停用') }
+      );
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 130,
+    render(row) {
+      if (!canMaintain.value) {
+        return null;
+      }
+      return renderToggleButton(
+        row.is_active,
+        `确认停用资源池 ${row.name}？`,
+        () => handleDisablePool(row),
+        () => handleEnablePool(row)
+      );
+    }
+  }
 ];
 
 const machineColumns: DataTableColumns<MachineResourcePublic> = [
@@ -216,8 +250,68 @@ const machineColumns: DataTableColumns<MachineResourcePublic> = [
     render(row) {
       return row.tags.join(', ');
     }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 130,
+    render(row) {
+      if (!canMaintain.value) {
+        return null;
+      }
+      return renderToggleButton(
+        row.admin_status !== 'DISABLED',
+        `确认停用机器 ${row.resource_code}？`,
+        () => handleDisableMachine(row),
+        () => handleEnableMachine(row)
+      );
+    }
   }
 ];
+
+function renderToggleButton(
+  isEnabled: boolean,
+  confirmText: string,
+  disableAction: () => Promise<void>,
+  enableAction: () => Promise<void>
+) {
+  if (!isEnabled) {
+    return h(
+      NButton,
+      {
+        size: 'small',
+        secondary: true,
+        onClick: enableAction
+      },
+      {
+        icon: () => h(NIcon, null, { default: () => h(PlayCircle24Regular) }),
+        default: () => '恢复'
+      }
+    );
+  }
+  return h(
+    NPopconfirm,
+    {
+      onPositiveClick: disableAction
+    },
+    {
+      trigger: () =>
+        h(
+          NButton,
+          {
+            size: 'small',
+            type: 'error',
+            secondary: true
+          },
+          {
+            icon: () => h(NIcon, null, { default: () => h(DismissCircle24Regular) }),
+            default: () => '停用'
+          }
+        ),
+      default: () => confirmText
+    }
+  );
+}
 
 function poolRowKey(row: ResourcePoolPublic) {
   return row.id;
@@ -300,6 +394,46 @@ async function handleCreateMachine() {
     message.error(error instanceof Error ? error.message : '登记机器失败');
   } finally {
     creatingMachine.value = false;
+  }
+}
+
+async function handleDisablePool(pool: ResourcePoolPublic) {
+  try {
+    await disableResourcePool(pool.id);
+    message.success('资源池已停用');
+    await loadInventory();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '停用资源池失败');
+  }
+}
+
+async function handleEnablePool(pool: ResourcePoolPublic) {
+  try {
+    await enableResourcePool(pool.id);
+    message.success('资源池已恢复');
+    await loadInventory();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '恢复资源池失败');
+  }
+}
+
+async function handleDisableMachine(machine: MachineResourcePublic) {
+  try {
+    await disableMachine(machine.resource_code);
+    message.success('机器已停用');
+    await loadInventory();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '停用机器失败');
+  }
+}
+
+async function handleEnableMachine(machine: MachineResourcePublic) {
+  try {
+    await enableMachine(machine.resource_code);
+    message.success('机器已恢复');
+    await loadInventory();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '恢复机器失败');
   }
 }
 

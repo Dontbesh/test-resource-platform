@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.authorization import require_roles
 from app.auth.dependencies import get_current_user, get_db
 from app.identity.models import User, UserRole
-from app.resources.models import MachineResource, ResourcePool
+from app.resources.models import MachineResource, ResourceAdminStatus, ResourcePool
 from app.resources.schemas import (
     MachineResourceCreateRequest,
     MachineResourcePublic,
@@ -22,6 +22,8 @@ from app.resources.service import (
     get_resource_pool_by_name,
     list_machine_resources,
     list_resource_pools,
+    set_machine_admin_status,
+    set_resource_pool_active,
 )
 
 router = APIRouter()
@@ -71,8 +73,11 @@ def create_machine(
     _: Annotated[User, Depends(require_inventory_maintainer)],
     session: Annotated[Session, Depends(get_db)],
 ) -> MachineResource:
-    if get_resource_pool_by_id(session, body.pool_id) is None:
+    pool = get_resource_pool_by_id(session, body.pool_id)
+    if pool is None:
         raise_resource_pool_not_found()
+    if not pool.is_active:
+        raise_resource_pool_disabled()
     if get_machine_by_resource_code(session, body.resource_code) is not None:
         raise_resource_code_exists()
     try:
@@ -81,6 +86,62 @@ def create_machine(
     except IntegrityError:
         session.rollback()
         raise_resource_code_exists()
+    return machine
+
+
+@router.post("/resource-pools/{pool_id}/disable", response_model=ResourcePoolPublic)
+def disable_pool(
+    pool_id: int,
+    _: Annotated[User, Depends(require_inventory_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ResourcePool:
+    pool = get_resource_pool_by_id(session, pool_id)
+    if pool is None:
+        raise_resource_pool_not_found()
+    set_resource_pool_active(session, pool, False)
+    session.commit()
+    return pool
+
+
+@router.post("/resource-pools/{pool_id}/enable", response_model=ResourcePoolPublic)
+def enable_pool(
+    pool_id: int,
+    _: Annotated[User, Depends(require_inventory_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ResourcePool:
+    pool = get_resource_pool_by_id(session, pool_id)
+    if pool is None:
+        raise_resource_pool_not_found()
+    set_resource_pool_active(session, pool, True)
+    session.commit()
+    return pool
+
+
+@router.post("/machines/{resource_code}/disable", response_model=MachineResourcePublic)
+def disable_machine(
+    resource_code: str,
+    _: Annotated[User, Depends(require_inventory_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> MachineResource:
+    machine = get_machine_by_resource_code(session, resource_code)
+    if machine is None:
+        raise_machine_not_found()
+    set_machine_admin_status(session, machine, ResourceAdminStatus.DISABLED)
+    session.commit()
+    return machine
+
+
+@router.post("/machines/{resource_code}/enable", response_model=MachineResourcePublic)
+def enable_machine(
+    resource_code: str,
+    _: Annotated[User, Depends(require_inventory_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> MachineResource:
+    machine = get_machine_by_resource_code(session, resource_code)
+    if machine is None:
+        raise_machine_not_found()
+    set_machine_admin_status(session, machine, ResourceAdminStatus.ACTIVE)
+    session.commit()
     return machine
 
 
@@ -101,6 +162,13 @@ def raise_resource_pool_not_found() -> None:
     )
 
 
+def raise_resource_pool_disabled() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"error_code": "RESOURCE_POOL_DISABLED", "message": "Resource pool is disabled."},
+    )
+
+
 def raise_resource_code_exists() -> None:
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
@@ -108,4 +176,11 @@ def raise_resource_code_exists() -> None:
             "error_code": "RESOURCE_CODE_ALREADY_EXISTS",
             "message": "Resource code already exists.",
         },
+    )
+
+
+def raise_machine_not_found() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error_code": "MACHINE_NOT_FOUND", "message": "Machine not found."},
     )
