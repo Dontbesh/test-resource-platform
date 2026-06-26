@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from app.core.config import get_settings
 from app.db.base import Base
 from app.identity import models  # noqa: F401
+from app.leases import models as lease_models  # noqa: F401
 from app.resources import models as resource_models  # noqa: F401
 
 config = context.config
