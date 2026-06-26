@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import DashboardView from '@/views/DashboardView.vue';
 import HealthView from '@/views/HealthView.vue';
 import LoginView from '@/views/LoginView.vue';
+import ResourceInventoryView from '@/views/ResourceInventoryView.vue';
 import UserManagementView from '@/views/UserManagementView.vue';
 import { useAuthStore } from '@/stores/auth';
 
@@ -24,6 +25,12 @@ const router = createRouter({
       name: 'users',
       component: UserManagementView,
       meta: { requiresAuth: true, roles: ['ADMIN'] }
+    },
+    {
+      path: '/resources',
+      name: 'resources',
+      component: ResourceInventoryView,
+      meta: { requiresAuth: true }
     },
     {
       path: '/login',

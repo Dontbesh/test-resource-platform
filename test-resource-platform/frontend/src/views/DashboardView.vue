@@ -7,6 +7,12 @@
           <h1>后台首页</h1>
         </div>
         <n-space align="center">
+          <n-button secondary @click="router.push('/resources')">
+            <template #icon>
+              <n-icon><Server24Regular /></n-icon>
+            </template>
+            资源台账
+          </n-button>
           <n-button v-if="auth.user?.role === 'ADMIN'" secondary @click="router.push('/users')">
             <template #icon>
               <n-icon><People24Regular /></n-icon>
@@ -27,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { People24Regular } from '@vicons/fluent';
+import { People24Regular, Server24Regular } from '@vicons/fluent';
 import { useRouter } from 'vue-router';
 
 import { useAuthStore } from '@/stores/auth';
