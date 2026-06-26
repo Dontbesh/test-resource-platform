@@ -240,7 +240,15 @@ const machineColumns: DataTableColumns<MachineResourcePublic> = [
     key: 'admin_status',
     width: 110,
     render(row) {
-      return h(NTag, { type: row.admin_status === 'ACTIVE' ? 'success' : 'warning' }, { default: () => row.admin_status });
+      const pool = findPool(row.pool_id);
+      if (pool && !pool.is_active) {
+        return h(NTag, { type: 'error' }, { default: () => '资源池停用' });
+      }
+      return h(
+        NTag,
+        { type: row.admin_status === 'ACTIVE' ? 'success' : 'warning' },
+        { default: () => row.admin_status }
+      );
     }
   },
   { title: 'IP', key: 'ip_address' },
@@ -263,7 +271,8 @@ const machineColumns: DataTableColumns<MachineResourcePublic> = [
         row.admin_status !== 'DISABLED',
         `确认停用机器 ${row.resource_code}？`,
         () => handleDisableMachine(row),
-        () => handleEnableMachine(row)
+        () => handleEnableMachine(row),
+        isMachinePoolDisabled(row)
       );
     }
   }
@@ -273,7 +282,8 @@ function renderToggleButton(
   isEnabled: boolean,
   confirmText: string,
   disableAction: () => Promise<void>,
-  enableAction: () => Promise<void>
+  enableAction: () => Promise<void>,
+  disableEnableAction = false
 ) {
   if (!isEnabled) {
     return h(
@@ -281,6 +291,7 @@ function renderToggleButton(
       {
         size: 'small',
         secondary: true,
+        disabled: disableEnableAction,
         onClick: enableAction
       },
       {
@@ -322,7 +333,16 @@ function machineRowKey(row: MachineResourcePublic) {
 }
 
 function poolName(poolId: number) {
-  return pools.value.find((pool) => pool.id === poolId)?.name ?? `#${poolId}`;
+  return findPool(poolId)?.name ?? `#${poolId}`;
+}
+
+function findPool(poolId: number) {
+  return pools.value.find((pool) => pool.id === poolId);
+}
+
+function isMachinePoolDisabled(machine: MachineResourcePublic) {
+  const pool = findPool(machine.pool_id);
+  return Boolean(pool && !pool.is_active);
 }
 
 async function loadInventory() {

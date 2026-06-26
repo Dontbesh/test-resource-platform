@@ -140,6 +140,11 @@ def enable_machine(
     machine = get_machine_by_resource_code(session, resource_code)
     if machine is None:
         raise_machine_not_found()
+    pool = get_resource_pool_by_id(session, machine.pool_id)
+    if pool is None:
+        raise_resource_pool_not_found()
+    if not pool.is_active:
+        raise_resource_pool_disabled()
     set_machine_admin_status(session, machine, ResourceAdminStatus.ACTIVE)
     session.commit()
     return machine

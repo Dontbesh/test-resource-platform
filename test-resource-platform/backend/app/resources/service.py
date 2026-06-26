@@ -31,6 +31,11 @@ def create_resource_pool(session: Session, body: ResourcePoolCreateRequest) -> R
 
 def set_resource_pool_active(session: Session, pool: ResourcePool, is_active: bool) -> ResourcePool:
     pool.is_active = is_active
+    if not is_active:
+        for machine in session.scalars(
+            select(MachineResource).where(MachineResource.pool_id == pool.id)
+        ):
+            machine.admin_status = ResourceAdminStatus.DISABLED
     session.flush()
     return pool
 

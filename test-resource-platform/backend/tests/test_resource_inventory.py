@@ -208,6 +208,7 @@ def test_tse_can_disable_and_enable_pool_and_machine(client: TestClient) -> None
     login(client, "tse02", "Tse02@123456")
 
     disable_pool_response = client.post(f"/api/v1/resource-pools/{pool_id}/disable")
+    machines_after_pool_disable = client.get("/api/v1/machines")
     blocked_machine_response = client.post(
         "/api/v1/machines",
         json={
@@ -217,18 +218,22 @@ def test_tse_can_disable_and_enable_pool_and_machine(client: TestClient) -> None
             "pool_id": pool_id,
         },
     )
+    blocked_machine_enable_response = client.post("/api/v1/machines/SN-PHY-005/enable")
     enable_pool_response = client.post(f"/api/v1/resource-pools/{pool_id}/enable")
-    disable_machine_response = client.post("/api/v1/machines/SN-PHY-005/disable")
     enable_machine_response = client.post("/api/v1/machines/SN-PHY-005/enable")
 
     assert disable_pool_response.status_code == 200
     assert disable_pool_response.json()["is_active"] is False
+    assert machines_after_pool_disable.status_code == 200
+    assert machines_after_pool_disable.json()[0]["admin_status"] == "DISABLED"
     assert blocked_machine_response.status_code == 409
     assert blocked_machine_response.json()["detail"]["error_code"] == "RESOURCE_POOL_DISABLED"
+    assert blocked_machine_enable_response.status_code == 409
+    assert (
+        blocked_machine_enable_response.json()["detail"]["error_code"] == "RESOURCE_POOL_DISABLED"
+    )
     assert enable_pool_response.status_code == 200
     assert enable_pool_response.json()["is_active"] is True
-    assert disable_machine_response.status_code == 200
-    assert disable_machine_response.json()["admin_status"] == "DISABLED"
     assert enable_machine_response.status_code == 200
     assert enable_machine_response.json()["admin_status"] == "ACTIVE"
 
