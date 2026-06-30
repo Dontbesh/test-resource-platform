@@ -97,6 +97,20 @@ http://localhost:5173/login
 
 生产或共享测试环境必须修改默认密码和 `SESSION_SECRET_KEY`。
 
+凭据功能需要配置 Fernet 加密密钥：
+
+```text
+CREDENTIAL_ENCRYPTION_KEY=<fernet-key>
+```
+
+可用以下命令生成密钥：
+
+```powershell
+.\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+`.env.example` 中的值只用于本地开发示例，生产或共享测试环境必须替换。
+
 ## 后端测试
 
 在 `backend/` 目录安装依赖后运行：
@@ -116,7 +130,7 @@ npm run build
 
 ## 当前边界
 
-当前已包含工程链路、Web 登录、`ADMIN` 用户管理、基础接口级 RBAC、资源池、机器台账和资源租约最小闭环。
+当前已包含工程链路、Web 登录、`ADMIN` 用户管理、基础接口级 RBAC、资源池、机器台账、资源租约最小闭环、机器凭据基础能力和按需连通性检查。
 
 `ADMIN` 登录后可从后台首页进入用户管理页，创建 `ADMIN` / `TSE` / `TE` 用户、禁用用户和重置密码。
 
@@ -124,10 +138,20 @@ npm run build
 
 登录用户可占用一台可用机器、查看“我的租约”，并按不可变 `lease_id` 释放自己的有效租约。占用成功不会返回 SSH/BMC 密码。
 
+`ADMIN` / `TSE` 可为机器配置 SSH/BMC 凭据，敏感字段会加密入库。普通机器凭据仅 `ADMIN` 或当前有效租约占用人可查看；关键机器凭据仅 `ADMIN` 可查看。每次成功查看凭据都会写入后端审计表。
+
+登录用户可对机器执行按需连通性检查，首版检查 SSH 端口和 BMC HTTPS 端口。
+
 资源租约相关接口：
 
 - `POST /api/v1/leases`
 - `GET /api/v1/leases/my`
 - `POST /api/v1/leases/{lease_id}/release`
 
-当前尚未包含 PAT 生命周期、凭据、CSV 导入、连通性检查、租约延期、强制释放、租约事件查询和审计能力。
+凭据和连通性相关接口：
+
+- `PUT /api/v1/machines/{resource_code}/credentials`
+- `GET /api/v1/machines/{resource_code}/credentials`
+- `POST /api/v1/machines/{resource_code}/connectivity-checks`
+
+当前尚未包含 PAT 生命周期、CSV 导入、租约延期、强制释放、租约事件查询、审计查询页面、真实远程命令执行和 IPMI/Redfish 电源操作。

@@ -145,6 +145,85 @@
           </n-space>
         </n-form>
       </n-modal>
+
+      <n-modal
+        v-model:show="credentialModalVisible"
+        preset="card"
+        class="credential-modal"
+        title="配置凭据"
+      >
+        <n-form
+          label-placement="top"
+          :model="credentialForm"
+          @submit.prevent="handleConfigureCredentials"
+        >
+          <n-form-item label="机器">
+            <n-input :value="selectedCredentialMachine?.resource_code ?? ''" disabled />
+          </n-form-item>
+          <n-form-item label="SSH 用户">
+            <n-input v-model:value="credentialForm.ssh_username" placeholder="root" />
+          </n-form-item>
+          <n-form-item label="SSH 密码">
+            <n-input
+              v-model:value="credentialForm.ssh_password"
+              type="password"
+              show-password-on="click"
+            />
+          </n-form-item>
+          <n-form-item label="BMC 用户">
+            <n-input v-model:value="credentialForm.bmc_username" placeholder="Administrator" />
+          </n-form-item>
+          <n-form-item label="BMC 密码">
+            <n-input
+              v-model:value="credentialForm.bmc_password"
+              type="password"
+              show-password-on="click"
+            />
+          </n-form-item>
+          <n-space justify="end">
+            <n-button @click="credentialModalVisible = false">取消</n-button>
+            <n-button type="primary" attr-type="submit" :loading="savingCredentials">保存</n-button>
+          </n-space>
+        </n-form>
+      </n-modal>
+
+      <n-modal
+        v-model:show="credentialViewModalVisible"
+        preset="card"
+        class="credential-modal"
+        title="查看凭据"
+      >
+        <n-form v-if="credentialSecret" label-placement="top">
+          <n-form-item label="机器">
+            <n-input :value="credentialSecret.resource_code" disabled />
+          </n-form-item>
+          <n-form-item label="SSH 用户">
+            <n-input :value="credentialSecret.ssh_username ?? ''" disabled />
+          </n-form-item>
+          <n-form-item label="SSH 密码">
+            <n-input :value="credentialSecret.ssh_password ?? ''" readonly />
+          </n-form-item>
+          <n-form-item label="BMC 用户">
+            <n-input :value="credentialSecret.bmc_username ?? ''" disabled />
+          </n-form-item>
+          <n-form-item label="BMC 密码">
+            <n-input :value="credentialSecret.bmc_password ?? ''" readonly />
+          </n-form-item>
+        </n-form>
+      </n-modal>
+
+      <n-modal
+        v-model:show="connectivityModalVisible"
+        preset="card"
+        class="connectivity-modal"
+        title="连通性检查"
+      >
+        <n-data-table
+          :columns="connectivityColumns"
+          :data="connectivityChecks"
+          :row-key="connectivityRowKey"
+        />
+      </n-modal>
     </section>
   </main>
 </template>
@@ -180,6 +259,15 @@ import {
   releaseResourceLease,
   type ResourceLeasePublic
 } from '@/api/resourceLeases';
+import {
+  configureMachineCredentials,
+  getMachineCredentials,
+  type MachineCredentialSecret
+} from '@/api/machineCredentials';
+import {
+  runMachineConnectivityCheck,
+  type ConnectivityCheckResult
+} from '@/api/connectivityChecks';
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
@@ -196,6 +284,15 @@ const leasing = ref(false);
 const releasingLeaseId = ref<string | null>(null);
 const leaseModalVisible = ref(false);
 const selectedMachine = ref<MachineResourcePublic | null>(null);
+const credentialModalVisible = ref(false);
+const credentialViewModalVisible = ref(false);
+const connectivityModalVisible = ref(false);
+const selectedCredentialMachine = ref<MachineResourcePublic | null>(null);
+const credentialSecret = ref<MachineCredentialSecret | null>(null);
+const connectivityChecks = ref<ConnectivityCheckResult[]>([]);
+const savingCredentials = ref(false);
+const viewingCredentialCode = ref<string | null>(null);
+const checkingConnectivityCode = ref<string | null>(null);
 const tagsText = ref('');
 
 const canMaintain = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'TSE');
@@ -220,6 +317,13 @@ const machineForm = reactive({
 const leaseForm = reactive({
   duration_minutes: 60,
   purpose: ''
+});
+
+const credentialForm = reactive({
+  ssh_username: '',
+  ssh_password: '',
+  bmc_username: '',
+  bmc_password: ''
 });
 
 const resourceTypeOptions = [
@@ -335,10 +439,15 @@ const machineColumns: DataTableColumns<MachineResourcePublic> = [
   {
     title: '操作',
     key: 'actions',
-    width: 220,
+    width: 360,
     render(row) {
-      const actions = [renderLeaseButton(row)];
+      const actions = [
+        renderLeaseButton(row),
+        renderCredentialViewButton(row),
+        renderConnectivityButton(row)
+      ];
       if (canMaintain.value) {
+        actions.push(renderCredentialConfigButton(row));
         actions.push(
           renderToggleButton(
             row.admin_status !== 'DISABLED',
@@ -420,6 +529,40 @@ const leaseColumns: DataTableColumns<ResourceLeasePublic> = [
   }
 ];
 
+const connectivityColumns: DataTableColumns<ConnectivityCheckResult> = [
+  { title: '目标', key: 'target', width: 120 },
+  { title: '地址', key: 'host' },
+  { title: '端口', key: 'port', width: 90 },
+  {
+    title: '状态',
+    key: 'status',
+    width: 110,
+    render(row) {
+      return h(
+        NTag,
+        { type: row.status === 'REACHABLE' ? 'success' : 'error' },
+        { default: () => (row.status === 'REACHABLE' ? '可达' : '不可达') }
+      );
+    }
+  },
+  {
+    title: '耗时',
+    key: 'latency_ms',
+    width: 100,
+    render(row) {
+      return row.latency_ms === null ? '-' : `${row.latency_ms} ms`;
+    }
+  },
+  {
+    title: '错误',
+    key: 'error',
+    ellipsis: { tooltip: true },
+    render(row) {
+      return row.error ?? '-';
+    }
+  }
+];
+
 function renderLeaseButton(machine: MachineResourcePublic) {
   const disabled = !isMachineLeasable(machine) || machine.occupancy_status === 'OCCUPIED';
   return h(
@@ -435,6 +578,44 @@ function renderLeaseButton(machine: MachineResourcePublic) {
       icon: () => h(NIcon, null, { default: () => h(PlayCircle24Regular) }),
       default: () => (machine.occupancy_status === 'OCCUPIED' ? '已占用' : '占用')
     }
+  );
+}
+
+function renderCredentialViewButton(machine: MachineResourcePublic) {
+  return h(
+    NButton,
+    {
+      size: 'small',
+      secondary: true,
+      loading: viewingCredentialCode.value === machine.resource_code,
+      onClick: () => handleViewCredentials(machine)
+    },
+    { default: () => '查看凭据' }
+  );
+}
+
+function renderCredentialConfigButton(machine: MachineResourcePublic) {
+  return h(
+    NButton,
+    {
+      size: 'small',
+      secondary: true,
+      onClick: () => openCredentialModal(machine)
+    },
+    { default: () => '配置凭据' }
+  );
+}
+
+function renderConnectivityButton(machine: MachineResourcePublic) {
+  return h(
+    NButton,
+    {
+      size: 'small',
+      secondary: true,
+      loading: checkingConnectivityCode.value === machine.resource_code,
+      onClick: () => handleConnectivityCheck(machine)
+    },
+    { default: () => '连通性' }
   );
 }
 
@@ -494,6 +675,10 @@ function machineRowKey(row: MachineResourcePublic) {
 
 function leaseRowKey(row: ResourceLeasePublic) {
   return row.lease_id;
+}
+
+function connectivityRowKey(row: ConnectivityCheckResult) {
+  return `${row.target}-${row.host}-${row.port}`;
 }
 
 function poolName(poolId: number) {
@@ -640,6 +825,62 @@ async function handleReleaseLease(lease: ResourceLeasePublic) {
   }
 }
 
+function openCredentialModal(machine: MachineResourcePublic) {
+  selectedCredentialMachine.value = machine;
+  credentialForm.ssh_username = '';
+  credentialForm.ssh_password = '';
+  credentialForm.bmc_username = '';
+  credentialForm.bmc_password = '';
+  credentialModalVisible.value = true;
+}
+
+async function handleConfigureCredentials() {
+  if (!selectedCredentialMachine.value) {
+    return;
+  }
+  savingCredentials.value = true;
+  try {
+    await configureMachineCredentials(selectedCredentialMachine.value.resource_code, {
+      ssh_username: credentialForm.ssh_username || null,
+      ssh_password: credentialForm.ssh_password || null,
+      bmc_username: credentialForm.bmc_username || null,
+      bmc_password: credentialForm.bmc_password || null
+    });
+    credentialModalVisible.value = false;
+    selectedCredentialMachine.value = null;
+    message.success('凭据已保存');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '保存凭据失败');
+  } finally {
+    savingCredentials.value = false;
+  }
+}
+
+async function handleViewCredentials(machine: MachineResourcePublic) {
+  viewingCredentialCode.value = machine.resource_code;
+  try {
+    credentialSecret.value = await getMachineCredentials(machine.resource_code);
+    credentialViewModalVisible.value = true;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '查看凭据失败');
+  } finally {
+    viewingCredentialCode.value = null;
+  }
+}
+
+async function handleConnectivityCheck(machine: MachineResourcePublic) {
+  checkingConnectivityCode.value = machine.resource_code;
+  try {
+    const response = await runMachineConnectivityCheck(machine.resource_code);
+    connectivityChecks.value = response.checks;
+    connectivityModalVisible.value = true;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '连通性检查失败');
+  } finally {
+    checkingConnectivityCode.value = null;
+  }
+}
+
 async function handleDisablePool(pool: ResourcePoolPublic) {
   try {
     await disableResourcePool(pool.id);
@@ -741,6 +982,14 @@ h1 {
 
 .lease-modal {
   width: min(520px, calc(100vw - 32px));
+}
+
+.credential-modal {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.connectivity-modal {
+  width: min(760px, calc(100vw - 32px));
 }
 
 .full-width {

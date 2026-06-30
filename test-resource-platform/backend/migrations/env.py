@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
+from app.credentials import models as credential_models  # noqa: F401
 from app.db.base import Base
 from app.identity import models  # noqa: F401
 from app.leases import models as lease_models  # noqa: F401

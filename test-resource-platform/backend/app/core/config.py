@@ -15,6 +15,7 @@ class Settings:
     initial_admin_username: str
     initial_admin_password: str
     auto_create_schema: bool
+    credential_encryption_key: str | None
 
 
 @lru_cache
@@ -33,4 +34,5 @@ def get_settings() -> Settings:
         initial_admin_username=getenv("INITIAL_ADMIN_USERNAME", "admin"),
         initial_admin_password=getenv("INITIAL_ADMIN_PASSWORD", "Admin@123456"),
         auto_create_schema=getenv("AUTO_CREATE_SCHEMA", "false").lower() == "true",
+        credential_encryption_key=getenv("CREDENTIAL_ENCRYPTION_KEY"),
     )
