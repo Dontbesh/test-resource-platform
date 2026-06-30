@@ -42,6 +42,7 @@ export type MachineResourcePublic = {
   tags: string[];
   occupancy_status: MachineOccupancyStatus;
   leased_by_username: string | null;
+  active_lease_id: string | null;
   created_at: string;
   updated_at: string;
 };

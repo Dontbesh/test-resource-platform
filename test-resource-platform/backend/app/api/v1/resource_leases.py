@@ -4,10 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth.authorization import require_roles
 from app.auth.dependencies import get_current_user, get_db
-from app.identity.models import User
+from app.identity.models import User, UserRole
 from app.leases.models import ResourceLease
-from app.leases.schemas import ResourceLeaseCreateRequest, ResourceLeasePublic
+from app.leases.schemas import (
+    ResourceLeaseCreateRequest,
+    ResourceLeaseEventPublic,
+    ResourceLeaseExtendRequest,
+    ResourceLeasePublic,
+)
 from app.leases.service import (
     LeaseNotActiveError,
     LeaseNotFoundError,
@@ -17,11 +23,15 @@ from app.leases.service import (
     ResourceAlreadyLeasedError,
     ResourcePoolDisabledError,
     create_resource_lease,
+    extend_resource_lease,
+    force_release_resource_lease,
+    list_lease_events,
     list_user_leases,
     release_resource_lease,
 )
 
 router = APIRouter()
+require_lease_operator = require_roles(UserRole.ADMIN, UserRole.TSE)
 
 
 @router.post("/leases", response_model=ResourceLeasePublic, status_code=status.HTTP_201_CREATED)
@@ -57,6 +67,17 @@ def list_my_leases(
     return leases
 
 
+@router.get("/lease-events", response_model=list[ResourceLeaseEventPublic])
+def list_events(
+    _: Annotated[User, Depends(require_lease_operator)],
+    session: Annotated[Session, Depends(get_db)],
+    after_id: int | None = None,
+    limit: int = 100,
+) -> list:
+    bounded_limit = min(max(limit, 1), 200)
+    return list_lease_events(session, after_id=after_id, limit=bounded_limit)
+
+
 @router.post("/leases/{lease_id}/release", response_model=ResourceLeasePublic)
 def release_lease(
     lease_id: str,
@@ -70,6 +91,41 @@ def release_lease(
         raise_lease_not_found()
     except LeaseNotOwnedError:
         raise_lease_not_owned()
+    except LeaseNotActiveError:
+        raise_lease_not_active()
+    return lease
+
+
+@router.post("/leases/{lease_id}/extend", response_model=ResourceLeasePublic)
+def extend_lease(
+    lease_id: str,
+    body: ResourceLeaseExtendRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ResourceLease:
+    try:
+        lease = extend_resource_lease(session, lease_id, current_user, body)
+        session.commit()
+    except LeaseNotFoundError:
+        raise_lease_not_found()
+    except LeaseNotOwnedError:
+        raise_lease_not_owned()
+    except LeaseNotActiveError:
+        raise_lease_not_active()
+    return lease
+
+
+@router.post("/leases/{lease_id}/force-release", response_model=ResourceLeasePublic)
+def force_release_lease(
+    lease_id: str,
+    current_user: Annotated[User, Depends(require_lease_operator)],
+    session: Annotated[Session, Depends(get_db)],
+) -> ResourceLease:
+    try:
+        lease = force_release_resource_lease(session, lease_id, current_user)
+        session.commit()
+    except LeaseNotFoundError:
+        raise_lease_not_found()
     except LeaseNotActiveError:
         raise_lease_not_active()
     return lease

@@ -66,6 +66,7 @@ class MachineResourcePublic(BaseModel):
     tags: list[str]
     occupancy_status: MachineOccupancyStatus = MachineOccupancyStatus.FREE
     leased_by_username: str | None = None
+    active_lease_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

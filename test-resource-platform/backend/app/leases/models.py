@@ -15,6 +15,14 @@ class LeaseStatus(StrEnum):
     EXPIRED = "EXPIRED"
 
 
+class LeaseEventType(StrEnum):
+    CREATED = "CREATED"
+    EXTENDED = "EXTENDED"
+    RELEASED = "RELEASED"
+    EXPIRED = "EXPIRED"
+    FORCE_RELEASED = "FORCE_RELEASED"
+
+
 class ResourceLease(Base):
     __tablename__ = "resource_leases"
     __table_args__ = (
@@ -67,3 +75,49 @@ class ResourceLease(Base):
 
     machine: Mapped[MachineResource] = relationship(MachineResource)
     user: Mapped[User] = relationship(User)
+
+
+class ResourceLeaseEvent(Base):
+    __tablename__ = "resource_lease_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lease_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    resource_lease_id: Mapped[int] = mapped_column(
+        ForeignKey("resource_leases.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    machine_id: Mapped[int] = mapped_column(
+        ForeignKey("machine_resources.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    actor_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    target_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    event_type: Mapped[LeaseEventType] = mapped_column(
+        Enum(LeaseEventType),
+        nullable=False,
+        index=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    previous_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    new_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    resource_lease: Mapped[ResourceLease] = relationship(ResourceLease)
+    machine: Mapped[MachineResource] = relationship(MachineResource)
+    actor_user: Mapped[User] = relationship(User, foreign_keys=[actor_user_id])
+    target_user: Mapped[User] = relationship(User, foreign_keys=[target_user_id])

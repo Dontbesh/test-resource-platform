@@ -147,6 +147,34 @@
       </n-modal>
 
       <n-modal
+        v-model:show="extendModalVisible"
+        preset="card"
+        class="lease-modal"
+        title="延期租约"
+      >
+        <n-form label-placement="top" :model="extendForm" @submit.prevent="handleExtendLease">
+          <n-form-item label="租约编号">
+            <n-input :value="selectedLease?.lease_id ?? ''" disabled />
+          </n-form-item>
+          <n-form-item label="延长时长（分钟）">
+            <n-input-number
+              v-model:value="extendForm.duration_minutes"
+              :min="1"
+              :max="1440"
+              :step="30"
+              class="full-width"
+            />
+          </n-form-item>
+          <n-space justify="end">
+            <n-button @click="extendModalVisible = false">取消</n-button>
+            <n-button type="primary" attr-type="submit" :loading="extendingLeaseId !== null">
+              延期
+            </n-button>
+          </n-space>
+        </n-form>
+      </n-modal>
+
+      <n-modal
         v-model:show="credentialModalVisible"
         preset="card"
         class="credential-modal"
@@ -255,6 +283,8 @@ import {
 } from '@/api/resourceInventory';
 import {
   createResourceLease,
+  extendResourceLease,
+  forceReleaseResourceLease,
   listMyLeases,
   releaseResourceLease,
   type ResourceLeasePublic
@@ -282,8 +312,12 @@ const creatingPool = ref(false);
 const creatingMachine = ref(false);
 const leasing = ref(false);
 const releasingLeaseId = ref<string | null>(null);
+const extendingLeaseId = ref<string | null>(null);
+const forceReleasingLeaseId = ref<string | null>(null);
 const leaseModalVisible = ref(false);
+const extendModalVisible = ref(false);
 const selectedMachine = ref<MachineResourcePublic | null>(null);
+const selectedLease = ref<ResourceLeasePublic | null>(null);
 const credentialModalVisible = ref(false);
 const credentialViewModalVisible = ref(false);
 const connectivityModalVisible = ref(false);
@@ -317,6 +351,10 @@ const machineForm = reactive({
 const leaseForm = reactive({
   duration_minutes: 60,
   purpose: ''
+});
+
+const extendForm = reactive({
+  duration_minutes: 60
 });
 
 const credentialForm = reactive({
@@ -447,6 +485,9 @@ const machineColumns: DataTableColumns<MachineResourcePublic> = [
         renderConnectivityButton(row)
       ];
       if (canMaintain.value) {
+        if (row.occupancy_status === 'OCCUPIED' && row.active_lease_id) {
+          actions.push(renderForceReleaseButton(row));
+        }
         actions.push(renderCredentialConfigButton(row));
         actions.push(
           renderToggleButton(
@@ -500,29 +541,46 @@ const leaseColumns: DataTableColumns<ResourceLeasePublic> = [
   {
     title: '操作',
     key: 'actions',
-    width: 120,
+    width: 190,
     render(row) {
       if (row.status !== 'ACTIVE') {
         return null;
       }
       return h(
-        NPopconfirm,
+        NSpace,
+        { size: 8 },
         {
-          onPositiveClick: () => handleReleaseLease(row)
-        },
-        {
-          trigger: () =>
+          default: () => [
             h(
               NButton,
               {
                 size: 'small',
-                type: 'error',
                 secondary: true,
-                loading: releasingLeaseId.value === row.lease_id
+                onClick: () => openExtendModal(row)
               },
-              { default: () => '释放' }
+              { default: () => '延期' }
             ),
-          default: () => `确认释放租约 ${row.lease_id}？`
+            h(
+              NPopconfirm,
+              {
+                onPositiveClick: () => handleReleaseLease(row)
+              },
+              {
+                trigger: () =>
+                  h(
+                    NButton,
+                    {
+                      size: 'small',
+                      type: 'error',
+                      secondary: true,
+                      loading: releasingLeaseId.value === row.lease_id
+                    },
+                    { default: () => '释放' }
+                  ),
+                default: () => `确认释放租约 ${row.lease_id}？`
+              }
+            )
+          ]
         }
       );
     }
@@ -616,6 +674,29 @@ function renderConnectivityButton(machine: MachineResourcePublic) {
       onClick: () => handleConnectivityCheck(machine)
     },
     { default: () => '连通性' }
+  );
+}
+
+function renderForceReleaseButton(machine: MachineResourcePublic) {
+  return h(
+    NPopconfirm,
+    {
+      onPositiveClick: () => handleForceReleaseMachine(machine)
+    },
+    {
+      trigger: () =>
+        h(
+          NButton,
+          {
+            size: 'small',
+            type: 'error',
+            secondary: true,
+            loading: forceReleasingLeaseId.value === machine.active_lease_id
+          },
+          { default: () => '强制释放' }
+        ),
+      default: () => `确认强制释放 ${machine.resource_code} 的当前租约？`
+    }
   );
 }
 
@@ -812,6 +893,32 @@ async function handleCreateLease() {
   }
 }
 
+function openExtendModal(lease: ResourceLeasePublic) {
+  selectedLease.value = lease;
+  extendForm.duration_minutes = 60;
+  extendModalVisible.value = true;
+}
+
+async function handleExtendLease() {
+  if (!selectedLease.value) {
+    return;
+  }
+  extendingLeaseId.value = selectedLease.value.lease_id;
+  try {
+    await extendResourceLease(selectedLease.value.lease_id, {
+      duration_minutes: extendForm.duration_minutes
+    });
+    extendModalVisible.value = false;
+    selectedLease.value = null;
+    message.success('租约已延期');
+    await loadInventory();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '延期租约失败');
+  } finally {
+    extendingLeaseId.value = null;
+  }
+}
+
 async function handleReleaseLease(lease: ResourceLeasePublic) {
   releasingLeaseId.value = lease.lease_id;
   try {
@@ -822,6 +929,23 @@ async function handleReleaseLease(lease: ResourceLeasePublic) {
     message.error(error instanceof Error ? error.message : '释放租约失败');
   } finally {
     releasingLeaseId.value = null;
+  }
+}
+
+async function handleForceReleaseMachine(machine: MachineResourcePublic) {
+  if (!machine.active_lease_id) {
+    message.error('当前机器没有可释放的有效租约');
+    return;
+  }
+  forceReleasingLeaseId.value = machine.active_lease_id;
+  try {
+    await forceReleaseResourceLease(machine.active_lease_id);
+    message.success('租约已强制释放');
+    await loadInventory();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '强制释放失败');
+  } finally {
+    forceReleasingLeaseId.value = null;
   }
 }
 

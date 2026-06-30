@@ -136,7 +136,7 @@ npm run build
 
 登录用户可查看资源池和机器列表；`ADMIN` / `TSE` 可创建资源池、登记物理机或虚拟机，并停用/恢复资源池和机器。
 
-登录用户可占用一台可用机器、查看“我的租约”，并按不可变 `lease_id` 释放自己的有效租约。占用成功不会返回 SSH/BMC 密码。
+登录用户可占用一台可用机器、查看“我的租约”，并按不可变 `lease_id` 释放或延期自己的有效租约。`ADMIN` / `TSE` 可强制释放他人的有效租约。占用、延期、释放、到期和强制释放都会写入租约事件。占用成功不会返回 SSH/BMC 密码。
 
 `ADMIN` / `TSE` 可为机器配置 SSH/BMC 凭据，敏感字段会加密入库。普通机器凭据仅 `ADMIN` 或当前有效租约占用人可查看；关键机器凭据仅 `ADMIN` 可查看。每次成功查看凭据都会写入后端审计表。
 
@@ -147,6 +147,9 @@ npm run build
 - `POST /api/v1/leases`
 - `GET /api/v1/leases/my`
 - `POST /api/v1/leases/{lease_id}/release`
+- `POST /api/v1/leases/{lease_id}/extend`
+- `POST /api/v1/leases/{lease_id}/force-release`
+- `GET /api/v1/lease-events`
 
 凭据和连通性相关接口：
 
@@ -154,4 +157,4 @@ npm run build
 - `GET /api/v1/machines/{resource_code}/credentials`
 - `POST /api/v1/machines/{resource_code}/connectivity-checks`
 
-当前尚未包含 PAT 生命周期、CSV 导入、租约延期、强制释放、租约事件查询、审计查询页面、真实远程命令执行和 IPMI/Redfish 电源操作。
+当前尚未包含 PAT 生命周期、CSV 导入、通用审计查询页面、真实远程命令执行和 IPMI/Redfish 电源操作。
