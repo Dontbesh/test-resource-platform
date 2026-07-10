@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
+from app.db.session import get_session_factory
 from app.identity.models import User
 from app.identity.service import get_user_by_username
 from app.integrations.feishu.client import FeishuClientError, fetch_feishu_bot_info
@@ -25,6 +26,11 @@ from app.integrations.feishu.schemas import (
     FeishuSetupPollResponse,
     FeishuSetupSaveRequest,
     FeishuUserBindingCreateRequest,
+)
+from app.integrations.feishu.worker import (
+    FeishuWorkerManager,
+    FeishuWorkerStartError,
+    feishu_worker_manager,
 )
 
 
@@ -49,6 +55,10 @@ class FeishuPlatformUserNotFoundError(Exception):
 
 
 class FeishuBindingNotFoundError(Exception):
+    pass
+
+
+class FeishuWorkerError(Exception):
     pass
 
 
@@ -238,6 +248,61 @@ def check_feishu_app_connection(
     app.bot_open_id = bot_info.open_id
     app.status = FeishuAppStatus.CONNECTED
     app.last_connected_at = datetime.now(UTC)
+    app.last_error = None
+    session.flush()
+    return app
+
+
+def start_feishu_app_worker(
+    session: Session,
+    app_id: int,
+    cipher: CredentialCipher,
+    database_url: str,
+    manager: FeishuWorkerManager = feishu_worker_manager,
+) -> FeishuApp:
+    app = session.get(FeishuApp, app_id)
+    if app is None:
+        raise FeishuAppNotFoundError
+
+    try:
+        app_secret = cipher.decrypt(app.encrypted_app_secret) or ""
+    except CredentialDecryptionError as exc:
+        app.status = FeishuAppStatus.ERROR
+        app.last_error = "Failed to decrypt Feishu app secret."
+        session.flush()
+        raise FeishuWorkerError(app.last_error) from exc
+
+    try:
+        manager.start(
+            app=app,
+            app_secret=app_secret,
+            session_factory=get_session_factory(database_url),
+            cipher=cipher,
+        )
+    except FeishuWorkerStartError as exc:
+        app.status = FeishuAppStatus.ERROR
+        app.last_error = str(exc)
+        session.flush()
+        raise FeishuWorkerError(app.last_error) from exc
+
+    app.status = FeishuAppStatus.CONNECTED
+    app.last_connected_at = datetime.now(UTC)
+    app.last_error = None
+    session.flush()
+    return app
+
+
+def stop_feishu_app_worker(
+    session: Session,
+    app_id: int,
+    manager: FeishuWorkerManager = feishu_worker_manager,
+) -> FeishuApp:
+    app = session.get(FeishuApp, app_id)
+    if app is None:
+        raise FeishuAppNotFoundError
+
+    manager.stop(app_id)
+    app.status = FeishuAppStatus.DISCONNECTED
     app.last_error = None
     session.flush()
     return app

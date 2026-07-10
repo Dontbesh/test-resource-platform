@@ -118,6 +118,22 @@ export async function checkFeishuAppConnection(appId: number): Promise<FeishuApp
   return parseResponse<FeishuAppPublic>(response);
 }
 
+export async function startFeishuAppWorker(appId: number): Promise<FeishuAppPublic> {
+  const response = await fetch(`/api/v1/integrations/feishu/apps/${appId}/start`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<FeishuAppPublic>(response);
+}
+
+export async function stopFeishuAppWorker(appId: number): Promise<FeishuAppPublic> {
+  const response = await fetch(`/api/v1/integrations/feishu/apps/${appId}/stop`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<FeishuAppPublic>(response);
+}
+
 export async function listFeishuUserBindings(appId: number): Promise<FeishuUserBindingPublic[]> {
   const response = await fetch(`/api/v1/integrations/feishu/apps/${appId}/bindings`, {
     credentials: 'include'

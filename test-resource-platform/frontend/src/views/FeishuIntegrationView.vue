@@ -56,7 +56,7 @@
             {{ error }}
           </n-alert>
           <n-alert v-if="savedApp" type="success" title="应用已保存" class="status-alert">
-            {{ savedApp.name }} 已保存，后续可以继续开发 WebSocket 长连接和飞书命令。
+            {{ savedApp.name }} 已保存，可以在右侧启动 WebSocket worker 接收飞书消息。
           </n-alert>
         </section>
 
@@ -64,7 +64,7 @@
           <div class="panel-header">
             <div>
               <h2>已配置应用</h2>
-              <p>当前版本只保存应用配置，暂不启动长连接。</p>
+              <p>保存应用后，可以启动或停止该应用的 WebSocket worker。</p>
             </div>
             <n-button secondary :loading="loadingApps" @click="loadApps">刷新</n-button>
           </div>
@@ -122,6 +122,8 @@ import {
   listFeishuUserBindings,
   pollFeishuSetup,
   saveFeishuSetup,
+  startFeishuAppWorker,
+  stopFeishuAppWorker,
   type FeishuAppPublic,
   type FeishuSetupBeginResponse,
   type FeishuSetupStatus,
@@ -144,6 +146,8 @@ const savedApp = ref<FeishuAppPublic | null>(null);
 const apps = ref<FeishuAppPublic[]>([]);
 const loadingApps = ref(false);
 const checkingAppIds = ref(new Set<number>());
+const startingWorkerIds = ref(new Set<number>());
+const stoppingWorkerIds = ref(new Set<number>());
 const selectedAppId = ref<number | null>(null);
 const bindings = ref<FeishuUserBindingPublic[]>([]);
 const loadingBindings = ref(false);
@@ -230,9 +234,19 @@ const columns: DataTableColumns<FeishuAppPublic> = [
   {
     title: '操作',
     key: 'actions',
-    width: 130,
+    width: 250,
     render(row) {
-      return h(
+      return renderAppActions(row);
+    }
+  }
+];
+
+function renderAppActions(row: FeishuAppPublic) {
+  return h(
+    'div',
+    { class: 'app-actions' },
+    [
+      h(
         NButton,
         {
           size: 'small',
@@ -241,10 +255,32 @@ const columns: DataTableColumns<FeishuAppPublic> = [
           onClick: () => checkConnection(row.id)
         },
         { default: () => '检查连接' }
-      );
-    }
-  }
-];
+      ),
+      h(
+        NButton,
+        {
+          size: 'small',
+          type: 'primary',
+          secondary: true,
+          loading: startingWorkerIds.value.has(row.id),
+          onClick: () => startWorker(row.id)
+        },
+        { default: () => '启动' }
+      ),
+      h(
+        NButton,
+        {
+          size: 'small',
+          secondary: true,
+          disabled: row.status !== 'CONNECTED',
+          loading: stoppingWorkerIds.value.has(row.id),
+          onClick: () => stopWorker(row.id)
+        },
+        { default: () => '停止' }
+      )
+    ]
+  );
+}
 
 const bindingColumns: DataTableColumns<FeishuUserBindingPublic> = [
   { title: 'Open ID', key: 'open_id' },
@@ -460,6 +496,38 @@ async function checkConnection(appId: number) {
   }
 }
 
+async function startWorker(appId: number) {
+  startingWorkerIds.value = new Set(startingWorkerIds.value).add(appId);
+  try {
+    const updated = await startFeishuAppWorker(appId);
+    apps.value = apps.value.map((app) => (app.id === appId ? updated : app));
+    message.success('飞书 WebSocket worker 已启动');
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '飞书 WebSocket worker 启动失败');
+    await loadApps();
+  } finally {
+    const next = new Set(startingWorkerIds.value);
+    next.delete(appId);
+    startingWorkerIds.value = next;
+  }
+}
+
+async function stopWorker(appId: number) {
+  stoppingWorkerIds.value = new Set(stoppingWorkerIds.value).add(appId);
+  try {
+    const updated = await stopFeishuAppWorker(appId);
+    apps.value = apps.value.map((app) => (app.id === appId ? updated : app));
+    message.success('飞书 WebSocket worker 已停止');
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '飞书 WebSocket worker 停止失败');
+    await loadApps();
+  } finally {
+    const next = new Set(stoppingWorkerIds.value);
+    next.delete(appId);
+    stoppingWorkerIds.value = next;
+  }
+}
+
 function clearPollTimer() {
   if (pollTimer !== undefined) {
     window.clearTimeout(pollTimer);
@@ -602,6 +670,12 @@ p {
 
 .status-alert {
   margin-top: 16px;
+}
+
+.app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 @media (max-width: 980px) {

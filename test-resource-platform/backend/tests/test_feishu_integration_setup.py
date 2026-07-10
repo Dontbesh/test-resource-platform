@@ -264,6 +264,100 @@ def test_admin_can_check_feishu_app_connection(client, monkeypatch) -> None:
     }
 
 
+def test_admin_can_start_and_stop_feishu_worker(client, monkeypatch) -> None:
+    events: list[tuple[str, str, str | None]] = []
+
+    class FakeRuntime:
+        def __init__(self, app_id: str, app_secret: str) -> None:
+            self.app_id = app_id
+            self.app_secret = app_secret
+
+        def start(self) -> None:
+            events.append(("start", self.app_id, self.app_secret))
+
+        def stop(self) -> None:
+            events.append(("stop", self.app_id, None))
+
+    def fake_runtime_factory(context):
+        return FakeRuntime(context.app.app_id, context.app_secret)
+
+    from app.integrations.feishu import worker as feishu_worker
+
+    feishu_worker.feishu_worker_manager.stop_all()
+    monkeypatch.setattr(
+        feishu_worker.feishu_worker_manager,
+        "runtime_factory",
+        fake_runtime_factory,
+    )
+    login(client, "admin", "Admin@123456")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_worker",
+            "app_secret": "sec_worker",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    start_response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/start")
+    stop_response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/stop")
+
+    assert start_response.status_code == 200
+    assert start_response.json()["status"] == "CONNECTED"
+    assert start_response.json()["last_connected_at"] is not None
+    assert stop_response.status_code == 200
+    assert stop_response.json()["status"] == "DISCONNECTED"
+    assert events == [
+        ("start", "cli_worker", "sec_worker"),
+        ("stop", "cli_worker", None),
+    ]
+
+
+def test_start_feishu_worker_records_runtime_error(client, monkeypatch) -> None:
+    class FailingRuntime:
+        def start(self) -> None:
+            raise RuntimeError("websocket refused")
+
+        def stop(self) -> None:
+            raise AssertionError("stop should not be called")
+
+    def fake_runtime_factory(context):
+        return FailingRuntime()
+
+    from app.integrations.feishu import worker as feishu_worker
+
+    feishu_worker.feishu_worker_manager.stop_all()
+    monkeypatch.setattr(
+        feishu_worker.feishu_worker_manager,
+        "runtime_factory",
+        fake_runtime_factory,
+    )
+    login(client, "admin", "Admin@123456")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_worker_fail",
+            "app_secret": "sec_worker_fail",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/start")
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "FEISHU_WORKER_START_FAILED"
+    session_factory = get_session_factory(get_settings().database_url)
+    with session_factory() as session:
+        app = session.get(FeishuApp, app_id)
+        assert app is not None
+        assert app.status == "ERROR"
+        assert app.last_error == "websocket refused"
+
+
 def test_check_feishu_app_connection_records_remote_error(client, monkeypatch) -> None:
     def fake_fetch_feishu_bot_info(platform_type, app_id: str, app_secret: str):
         raise RuntimeError("invalid app secret")

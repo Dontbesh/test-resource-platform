@@ -25,6 +25,7 @@ from app.integrations.feishu.service import (
     FeishuPlatformUserNotFoundError,
     FeishuSetupError,
     FeishuSetupSessionNotFoundError,
+    FeishuWorkerError,
     begin_feishu_setup,
     check_feishu_app_connection,
     create_or_update_feishu_user_binding,
@@ -33,6 +34,8 @@ from app.integrations.feishu.service import (
     list_feishu_user_bindings,
     poll_feishu_setup,
     save_feishu_app,
+    start_feishu_app_worker,
+    stop_feishu_app_worker,
 )
 
 router = APIRouter(prefix="/integrations/feishu")
@@ -132,6 +135,48 @@ def check_app_connection(
         raise_feishu_connection_check_failed(str(exc))
 
 
+@router.post("/apps/{app_id}/start", response_model=FeishuAppPublic)
+def start_app_worker(
+    app_id: int,
+    _: Annotated[User, Depends(require_feishu_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> FeishuAppPublic:
+    settings = get_settings()
+    try:
+        app = start_feishu_app_worker(
+            session=session,
+            app_id=app_id,
+            cipher=CredentialCipher(settings.credential_encryption_key),
+            database_url=settings.database_url,
+        )
+        session.commit()
+        return app
+    except FeishuAppNotFoundError:
+        session.rollback()
+        raise_feishu_app_not_found()
+    except CredentialEncryptionKeyError:
+        session.rollback()
+        raise_credential_key_not_configured()
+    except FeishuWorkerError as exc:
+        session.commit()
+        raise_feishu_worker_start_failed(str(exc))
+
+
+@router.post("/apps/{app_id}/stop", response_model=FeishuAppPublic)
+def stop_app_worker(
+    app_id: int,
+    _: Annotated[User, Depends(require_feishu_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> FeishuAppPublic:
+    try:
+        app = stop_feishu_app_worker(session=session, app_id=app_id)
+        session.commit()
+        return app
+    except FeishuAppNotFoundError:
+        session.rollback()
+        raise_feishu_app_not_found()
+
+
 @router.get("/apps/{app_id}/bindings", response_model=list[FeishuUserBindingPublic])
 def list_app_bindings(
     app_id: int,
@@ -213,6 +258,16 @@ def raise_feishu_connection_check_failed(message: str) -> None:
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail={
             "error_code": "FEISHU_CONNECTION_CHECK_FAILED",
+            "message": message,
+        },
+    )
+
+
+def raise_feishu_worker_start_failed(message: str) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail={
+            "error_code": "FEISHU_WORKER_START_FAILED",
             "message": message,
         },
     )

@@ -307,11 +307,13 @@ Manual:
 - Done: Feishu message dispatch can decrypt saved app credentials and send text replies through Feishu Reply Message API; duplicate messages do not send duplicate replies.
 - Done: bound Feishu users can run deterministic resource commands in the message core: `/machines`, `/machines free`, `/lease`, `/my-leases`, `/release`, and `/extend`.
 - Done: `ADMIN` / `TSE` can manage Feishu `open_id` to platform user bindings from API and the Feishu integration page.
-- Not done yet: Feishu WebSocket worker and cards.
+- Done: `ADMIN` / `TSE` can manually start and stop a Feishu WebSocket worker for a saved app from API and the Feishu integration page.
+- Done: WebSocket worker uses the Feishu Python SDK runtime adapter, converts message events into `FeishuInboundMessage`, and dispatches through the existing Feishu message command pipeline.
+- Not done yet: Feishu interactive cards.
 
 Verification:
 
-- `.\.venv\Scripts\python.exe -m pytest`: 55 passed.
+- `.\.venv\Scripts\python.exe -m pytest`: 58 passed.
 - `.\.venv\Scripts\python.exe -m ruff check .`: passed.
 - SQLite Alembic `upgrade head`: passed.
 - `npm.cmd run build`: passed with existing Vite chunk size warning.
