@@ -46,16 +46,17 @@ def create_user(client: TestClient, username: str, password: str, role: str) -> 
 
 def test_admin_can_begin_feishu_setup_and_persist_session(client, monkeypatch) -> None:
     calls: list[tuple[str, dict[str, str]]] = []
+    long_device_code = "v1:" + ("x" * 700)
 
     def fake_registration_call(base_url: str, action: str, params: dict[str, str] | None):
         calls.append((action, params or {}))
         if action == "init":
             return {"supported_auth_methods": ["client_secret"]}
         return {
-            "device_code": "device-001",
+            "device_code": long_device_code,
             "verification_uri_complete": "https://open.feishu.cn/qr/device-001",
             "interval": 3,
-            "expire_in": 600,
+            "expires_in": 3600,
         }
 
     monkeypatch.setattr(
@@ -68,9 +69,10 @@ def test_admin_can_begin_feishu_setup_and_persist_session(client, monkeypatch) -
 
     assert response.status_code == 201
     body = response.json()
-    assert body["device_code"] == "device-001"
+    assert body["device_code"] == long_device_code
     assert body["qr_url"] == "https://open.feishu.cn/qr/device-001"
     assert body["interval"] == 3
+    assert body["expires_in"] == 3600
     assert calls == [
         ("init", {}),
         (
@@ -87,7 +89,7 @@ def test_admin_can_begin_feishu_setup_and_persist_session(client, monkeypatch) -
     with session_factory() as session:
         setup = session.scalar(select(FeishuSetupSession))
         assert setup is not None
-        assert setup.device_code == "device-001"
+        assert setup.device_code == long_device_code
         assert setup.status == FeishuSetupStatus.PENDING
 
 

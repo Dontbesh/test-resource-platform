@@ -20,7 +20,7 @@ def upgrade() -> None:
     op.create_table(
         "feishu_setup_sessions",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("device_code", sa.String(length=256), nullable=False),
+        sa.Column("device_code", sa.Text(), nullable=False),
         sa.Column("qr_url", sa.Text(), nullable=False),
         sa.Column("base_url", sa.String(length=256), nullable=False),
         sa.Column(

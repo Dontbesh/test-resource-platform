@@ -32,7 +32,7 @@ class FeishuSetupSession(Base):
     __tablename__ = "feishu_setup_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    device_code: Mapped[str] = mapped_column(String(256), unique=True, index=True, nullable=False)
+    device_code: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
     qr_url: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[FeishuSetupStatus] = mapped_column(

@@ -54,7 +54,7 @@ def begin_feishu_setup(session: Session, user: User) -> FeishuSetupBeginResponse
     device_code = str(begin_response.get("device_code") or "")
     qr_url = str(begin_response.get("verification_uri_complete") or "")
     interval = int(begin_response.get("interval") or 5)
-    expires_in = int(begin_response.get("expire_in") or 600)
+    expires_in = int(begin_response.get("expires_in") or begin_response.get("expire_in") or 600)
     if not device_code or not qr_url:
         raise FeishuSetupError("Feishu begin response is incomplete.")
 
