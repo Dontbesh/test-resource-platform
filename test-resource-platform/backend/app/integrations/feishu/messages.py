@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
+from app.integrations.feishu.client import FeishuClientError, send_feishu_text_reply
 from app.integrations.feishu.models import (
     FeishuApp,
     FeishuMessageEvent,
@@ -13,6 +15,10 @@ from app.integrations.feishu.models import (
 
 
 class FeishuMessageAppNotFoundError(Exception):
+    pass
+
+
+class FeishuMessageDispatchError(Exception):
     pass
 
 
@@ -31,6 +37,49 @@ class FeishuInboundMessage:
 class FeishuMessageResult:
     reply_text: str | None
     duplicate: bool
+
+
+@dataclass(frozen=True)
+class FeishuMessageDispatchResult:
+    reply_text: str | None
+    duplicate: bool
+    reply_sent: bool
+
+
+def dispatch_feishu_inbound_message(
+    session: Session,
+    inbound: FeishuInboundMessage,
+    cipher: CredentialCipher,
+) -> FeishuMessageDispatchResult:
+    result = handle_feishu_inbound_message(session, inbound)
+    if result.duplicate or not result.reply_text:
+        return FeishuMessageDispatchResult(
+            reply_text=result.reply_text,
+            duplicate=result.duplicate,
+            reply_sent=False,
+        )
+
+    app = session.get(FeishuApp, inbound.feishu_app_id)
+    if app is None:
+        raise FeishuMessageAppNotFoundError
+    try:
+        app_secret = cipher.decrypt(app.encrypted_app_secret) or ""
+        send_feishu_text_reply(
+            app.platform_type,
+            app.app_id,
+            app_secret,
+            inbound.message_id,
+            result.reply_text,
+        )
+    except (CredentialDecryptionError, FeishuClientError, RuntimeError) as exc:
+        mark_message_event_error(session, inbound, str(exc))
+        raise FeishuMessageDispatchError(str(exc)) from exc
+
+    return FeishuMessageDispatchResult(
+        reply_text=result.reply_text,
+        duplicate=False,
+        reply_sent=True,
+    )
 
 
 def handle_feishu_inbound_message(
@@ -64,6 +113,20 @@ def handle_feishu_inbound_message(
     session.add(event)
     session.flush()
     return FeishuMessageResult(reply_text=reply_text, duplicate=False)
+
+
+def mark_message_event_error(session: Session, inbound: FeishuInboundMessage, error: str) -> None:
+    event = session.scalar(
+        select(FeishuMessageEvent).where(
+            FeishuMessageEvent.feishu_app_id == inbound.feishu_app_id,
+            FeishuMessageEvent.message_id == inbound.message_id,
+        )
+    )
+    if event is None:
+        return
+    event.handled_status = FeishuMessageHandledStatus.ERROR
+    event.reply_text = error
+    session.flush()
 
 
 def build_reply_text(session: Session, inbound: FeishuInboundMessage) -> str:

@@ -42,6 +42,29 @@ def fetch_feishu_bot_info(
     return FeishuBotInfo(open_id=open_id, app_name=str(app_name) if app_name else None)
 
 
+def send_feishu_text_reply(
+    platform_type: FeishuPlatformType,
+    app_id: str,
+    app_secret: str,
+    message_id: str,
+    text: str,
+) -> None:
+    base_url = open_base_url(platform_type)
+    token = fetch_tenant_access_token(base_url, app_id, app_secret)
+    response = call_json(
+        "POST",
+        f"{base_url}/open-apis/im/v1/messages/{message_id}/reply",
+        headers={"Authorization": f"Bearer {token}"},
+        body={
+            "msg_type": "text",
+            "content": json.dumps({"text": text}, ensure_ascii=False),
+        },
+    )
+    code = int(response.get("code") or 0)
+    if code != 0:
+        raise FeishuClientError(remote_error_message(response, "message reply"))
+
+
 def fetch_tenant_access_token(base_url: str, app_id: str, app_secret: str) -> str:
     response = call_json(
         "POST",

@@ -5,8 +5,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from app.core.config import get_settings
+from app.credentials.crypto import CredentialCipher
 from app.db.session import get_engine, get_session_factory
-from app.integrations.feishu.messages import FeishuInboundMessage, handle_feishu_inbound_message
+from app.integrations.feishu.messages import (
+    FeishuInboundMessage,
+    dispatch_feishu_inbound_message,
+    handle_feishu_inbound_message,
+)
 from app.integrations.feishu.models import (
     FeishuApp,
     FeishuMessageEvent,
@@ -34,11 +39,12 @@ def session_factory(monkeypatch, tmp_path):
 
 
 def create_feishu_app(session) -> FeishuApp:
+    cipher = CredentialCipher("P4hnnBWP4qB-txrlIG20aQRk0RxEholITHKAcC3atkY=")
     app = FeishuApp(
         name="lab assistant",
         platform_type=FeishuPlatformType.FEISHU,
         app_id="cli_messages",
-        encrypted_app_secret="encrypted",
+        encrypted_app_secret=cipher.encrypt("sec_messages") or "",
         created_by_user_id=1,
     )
     session.add(app)
@@ -115,3 +121,66 @@ def test_whoami_message_reports_binding_status(session_factory) -> None:
         assert "ou_bound" in result.reply_text
         assert "admin" in result.reply_text
         assert "ADMIN" in result.reply_text
+
+
+def test_dispatch_message_sends_reply_once(session_factory, monkeypatch) -> None:
+    sent: list[dict[str, str]] = []
+
+    def fake_send_feishu_text_reply(platform_type, app_id, app_secret, message_id, text):
+        sent.append(
+            {
+                "platform_type": platform_type,
+                "app_id": app_id,
+                "app_secret": app_secret,
+                "message_id": message_id,
+                "text": text,
+            }
+        )
+
+    monkeypatch.setattr(
+        "app.integrations.feishu.messages.send_feishu_text_reply",
+        fake_send_feishu_text_reply,
+    )
+    with session_factory() as session:
+        app = create_feishu_app(session)
+
+        result = dispatch_feishu_inbound_message(
+            session,
+            inbound(app, "om_dispatch", "/help"),
+            CredentialCipher("P4hnnBWP4qB-txrlIG20aQRk0RxEholITHKAcC3atkY="),
+        )
+
+        assert result.reply_sent is True
+        assert result.duplicate is False
+        assert len(sent) == 1
+        assert sent[0]["platform_type"] == "FEISHU"
+        assert sent[0]["app_id"] == "cli_messages"
+        assert sent[0]["app_secret"] == "sec_messages"
+        assert sent[0]["message_id"] == "om_dispatch"
+        assert "/whoami" in sent[0]["text"]
+
+
+def test_dispatch_duplicate_message_does_not_send_reply(session_factory, monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_feishu_text_reply(platform_type, app_id, app_secret, message_id, text):
+        sent.append(message_id)
+
+    monkeypatch.setattr(
+        "app.integrations.feishu.messages.send_feishu_text_reply",
+        fake_send_feishu_text_reply,
+    )
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        cipher = CredentialCipher("P4hnnBWP4qB-txrlIG20aQRk0RxEholITHKAcC3atkY=")
+
+        dispatch_feishu_inbound_message(session, inbound(app, "om_once", "/help"), cipher)
+        duplicate = dispatch_feishu_inbound_message(
+            session,
+            inbound(app, "om_once", "/whoami"),
+            cipher,
+        )
+
+        assert duplicate.duplicate is True
+        assert duplicate.reply_sent is False
+        assert sent == ["om_once"]
