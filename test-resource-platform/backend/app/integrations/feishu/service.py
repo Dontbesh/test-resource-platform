@@ -3,8 +3,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.credentials.crypto import CredentialCipher
+from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
 from app.identity.models import User
+from app.integrations.feishu.client import FeishuClientError, fetch_feishu_bot_info
 from app.integrations.feishu.models import (
     FeishuApp,
     FeishuAppStatus,
@@ -29,6 +30,14 @@ class FeishuSetupError(Exception):
 
 
 class FeishuSetupSessionNotFoundError(Exception):
+    pass
+
+
+class FeishuAppNotFoundError(Exception):
+    pass
+
+
+class FeishuConnectionCheckError(Exception):
     pass
 
 
@@ -188,6 +197,39 @@ def save_feishu_app(
 
 def list_feishu_apps(session: Session) -> list[FeishuApp]:
     return list(session.scalars(select(FeishuApp).order_by(FeishuApp.id)))
+
+
+def check_feishu_app_connection(
+    session: Session,
+    app_id: int,
+    cipher: CredentialCipher,
+) -> FeishuApp:
+    app = session.get(FeishuApp, app_id)
+    if app is None:
+        raise FeishuAppNotFoundError
+
+    try:
+        app_secret = cipher.decrypt(app.encrypted_app_secret) or ""
+    except CredentialDecryptionError as exc:
+        app.status = FeishuAppStatus.ERROR
+        app.last_error = "Failed to decrypt Feishu app secret."
+        session.flush()
+        raise FeishuConnectionCheckError(app.last_error) from exc
+
+    try:
+        bot_info = fetch_feishu_bot_info(app.platform_type, app.app_id, app_secret)
+    except (FeishuClientError, RuntimeError) as exc:
+        app.status = FeishuAppStatus.ERROR
+        app.last_error = str(exc)
+        session.flush()
+        raise FeishuConnectionCheckError(app.last_error) from exc
+
+    app.bot_open_id = bot_info.open_id
+    app.status = FeishuAppStatus.CONNECTED
+    app.last_connected_at = datetime.now(UTC)
+    app.last_error = None
+    session.flush()
+    return app
 
 
 def raise_if_remote_error(response: dict, action: str) -> None:

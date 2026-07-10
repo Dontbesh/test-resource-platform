@@ -77,12 +77,13 @@
 
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue';
-import { NTag, useMessage, type DataTableColumns } from 'naive-ui';
+import { NButton, NTag, useMessage, type DataTableColumns } from 'naive-ui';
 import { ArrowLeft24Regular, PlugConnected24Regular, QrCode24Regular } from '@vicons/fluent';
 import { useRouter } from 'vue-router';
 
 import {
   beginFeishuSetup,
+  checkFeishuAppConnection,
   listFeishuApps,
   pollFeishuSetup,
   saveFeishuSetup,
@@ -106,6 +107,7 @@ const error = ref('');
 const savedApp = ref<FeishuAppPublic | null>(null);
 const apps = ref<FeishuAppPublic[]>([]);
 const loadingApps = ref(false);
+const checkingAppIds = ref(new Set<number>());
 let pollTimer: number | undefined;
 
 const qrImageUrl = computed(() => {
@@ -170,6 +172,23 @@ const columns: DataTableColumns<FeishuAppPublic> = [
     key: 'created_at',
     render(row) {
       return formatDateTime(row.created_at);
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 130,
+    render(row) {
+      return h(
+        NButton,
+        {
+          size: 'small',
+          secondary: true,
+          loading: checkingAppIds.value.has(row.id),
+          onClick: () => checkConnection(row.id)
+        },
+        { default: () => '检查连接' }
+      );
     }
   }
 ];
@@ -263,6 +282,22 @@ async function loadApps() {
     message.error(err instanceof Error ? err.message : '加载飞书应用失败');
   } finally {
     loadingApps.value = false;
+  }
+}
+
+async function checkConnection(appId: number) {
+  checkingAppIds.value = new Set(checkingAppIds.value).add(appId);
+  try {
+    const updated = await checkFeishuAppConnection(appId);
+    apps.value = apps.value.map((app) => (app.id === appId ? updated : app));
+    message.success('飞书应用连接检查通过');
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '飞书应用连接检查失败');
+    await loadApps();
+  } finally {
+    const next = new Set(checkingAppIds.value);
+    next.delete(appId);
+    checkingAppIds.value = next;
   }
 }
 

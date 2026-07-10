@@ -89,3 +89,11 @@ export async function listFeishuApps(): Promise<FeishuAppPublic[]> {
   });
   return parseResponse<FeishuAppPublic[]>(response);
 }
+
+export async function checkFeishuAppConnection(appId: number): Promise<FeishuAppPublic> {
+  const response = await fetch(`/api/v1/integrations/feishu/apps/${appId}/check-connection`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<FeishuAppPublic>(response);
+}

@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.credentials.crypto import CredentialCipher
 from app.db.session import get_engine, get_session_factory
+from app.integrations.feishu.client import FeishuBotInfo
 from app.integrations.feishu.models import FeishuApp, FeishuSetupSession, FeishuSetupStatus
 from app.main import create_app
 
@@ -215,3 +217,100 @@ def test_save_feishu_app_requires_encryption_key(monkeypatch, tmp_path) -> None:
 
     assert response.status_code == 500
     assert response.json()["detail"]["error_code"] == "CREDENTIAL_ENCRYPTION_KEY_NOT_CONFIGURED"
+
+
+def test_admin_can_check_feishu_app_connection(client, monkeypatch) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_fetch_feishu_bot_info(platform_type, app_id: str, app_secret: str):
+        seen["platform_type"] = platform_type
+        seen["app_id"] = app_id
+        seen["app_secret"] = app_secret
+        return FeishuBotInfo(open_id="ou_bot", app_name="资源助手")
+
+    monkeypatch.setattr(
+        "app.integrations.feishu.service.fetch_feishu_bot_info",
+        fake_fetch_feishu_bot_info,
+    )
+    login(client, "admin", "Admin@123456")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_check",
+            "app_secret": "sec_check",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/check-connection")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "CONNECTED"
+    assert body["bot_open_id"] == "ou_bot"
+    assert body["last_connected_at"] is not None
+    assert body["last_error"] is None
+    assert seen == {
+        "platform_type": "FEISHU",
+        "app_id": "cli_check",
+        "app_secret": "sec_check",
+    }
+
+
+def test_check_feishu_app_connection_records_remote_error(client, monkeypatch) -> None:
+    def fake_fetch_feishu_bot_info(platform_type, app_id: str, app_secret: str):
+        raise RuntimeError("invalid app secret")
+
+    monkeypatch.setattr(
+        "app.integrations.feishu.service.fetch_feishu_bot_info",
+        fake_fetch_feishu_bot_info,
+    )
+    login(client, "admin", "Admin@123456")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_bad",
+            "app_secret": "sec_bad",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/check-connection")
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["error_code"] == "FEISHU_CONNECTION_CHECK_FAILED"
+
+    session_factory = get_session_factory(get_settings().database_url)
+    with session_factory() as session:
+        app = session.get(FeishuApp, app_id)
+        assert app is not None
+        assert app.status == "ERROR"
+        assert app.last_error == "invalid app secret"
+
+
+def test_te_cannot_check_feishu_app_connection(client) -> None:
+    login(client, "admin", "Admin@123456")
+    create_user(client, "tester", "Tester@123456", "TE")
+    cipher = CredentialCipher(TEST_FERNET_KEY)
+    session_factory = get_session_factory(get_settings().database_url)
+    with session_factory() as session:
+        app = FeishuApp(
+            name="lab assistant",
+            platform_type="FEISHU",
+            app_id="cli_forbidden",
+            encrypted_app_secret=cipher.encrypt("sec_forbidden") or "",
+            created_by_user_id=1,
+        )
+        session.add(app)
+        session.commit()
+        app_id = app.id
+    client.post("/api/v1/auth/logout")
+    login(client, "tester", "Tester@123456")
+
+    response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/check-connection")
+
+    assert response.status_code == 403

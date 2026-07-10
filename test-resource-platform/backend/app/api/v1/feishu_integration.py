@@ -17,9 +17,12 @@ from app.integrations.feishu.schemas import (
     FeishuSetupSaveRequest,
 )
 from app.integrations.feishu.service import (
+    FeishuAppNotFoundError,
+    FeishuConnectionCheckError,
     FeishuSetupError,
     FeishuSetupSessionNotFoundError,
     begin_feishu_setup,
+    check_feishu_app_connection,
     list_feishu_apps,
     poll_feishu_setup,
     save_feishu_app,
@@ -97,6 +100,31 @@ def list_apps(
     return list_feishu_apps(session)
 
 
+@router.post("/apps/{app_id}/check-connection", response_model=FeishuAppPublic)
+def check_app_connection(
+    app_id: int,
+    _: Annotated[User, Depends(require_feishu_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> FeishuAppPublic:
+    try:
+        app = check_feishu_app_connection(
+            session=session,
+            app_id=app_id,
+            cipher=CredentialCipher(get_settings().credential_encryption_key),
+        )
+        session.commit()
+        return app
+    except FeishuAppNotFoundError:
+        session.rollback()
+        raise_feishu_app_not_found()
+    except CredentialEncryptionKeyError:
+        session.rollback()
+        raise_credential_key_not_configured()
+    except FeishuConnectionCheckError as exc:
+        session.commit()
+        raise_feishu_connection_check_failed(str(exc))
+
+
 def raise_feishu_setup_failed(message: str) -> None:
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
@@ -110,6 +138,26 @@ def raise_setup_session_not_found() -> None:
         detail={
             "error_code": "FEISHU_SETUP_SESSION_NOT_FOUND",
             "message": "Feishu setup session not found.",
+        },
+    )
+
+
+def raise_feishu_app_not_found() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "error_code": "FEISHU_APP_NOT_FOUND",
+            "message": "Feishu app not found.",
+        },
+    )
+
+
+def raise_feishu_connection_check_failed(message: str) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail={
+            "error_code": "FEISHU_CONNECTION_CHECK_FAILED",
+            "message": message,
         },
     )
 
