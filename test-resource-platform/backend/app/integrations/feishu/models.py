@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -25,6 +25,12 @@ class FeishuAppStatus(StrEnum):
     CONFIGURED = "CONFIGURED"
     CONNECTED = "CONNECTED"
     DISCONNECTED = "DISCONNECTED"
+    ERROR = "ERROR"
+
+
+class FeishuMessageHandledStatus(StrEnum):
+    REPLIED = "REPLIED"
+    IGNORED = "IGNORED"
     ERROR = "ERROR"
 
 
@@ -105,3 +111,67 @@ class FeishuApp(Base):
     )
 
     created_by: Mapped[User] = relationship()
+
+
+class FeishuUserBinding(Base):
+    __tablename__ = "feishu_user_bindings"
+    __table_args__ = (
+        UniqueConstraint("feishu_app_id", "open_id", name="uq_feishu_user_bindings_app_open_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feishu_app_id: Mapped[int] = mapped_column(
+        ForeignKey("feishu_apps.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    platform_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
+    open_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    feishu_app: Mapped[FeishuApp] = relationship()
+    platform_user: Mapped[User] = relationship()
+
+
+class FeishuMessageEvent(Base):
+    __tablename__ = "feishu_message_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "feishu_app_id",
+            "message_id",
+            name="uq_feishu_message_events_app_message",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feishu_app_id: Mapped[int] = mapped_column(
+        ForeignKey("feishu_apps.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    chat_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    sender_open_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    message_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_event_json: Mapped[str] = mapped_column(Text, nullable=False)
+    handled_status: Mapped[FeishuMessageHandledStatus] = mapped_column(
+        Enum(FeishuMessageHandledStatus),
+        nullable=False,
+    )
+    reply_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    feishu_app: Mapped[FeishuApp] = relationship()

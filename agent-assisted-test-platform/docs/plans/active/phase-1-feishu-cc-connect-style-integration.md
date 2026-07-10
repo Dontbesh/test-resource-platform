@@ -302,11 +302,13 @@ Manual:
 - Done: dashboard entry for `ADMIN` / `TSE`.
 - Done: runtime Feishu client can validate saved app credentials by fetching tenant token and bot info.
 - Done: admin/TSE can trigger app connection check from API and frontend; success records `bot_open_id`, `CONNECTED`, and `last_connected_at`; failure records `ERROR` and `last_error`.
-- Not done yet: Feishu WebSocket worker, user binding, message commands, and cards.
+- Done: `feishu_user_bindings` and `feishu_message_events` runtime tables with Alembic migration.
+- Done: Feishu message handling core records inbound message events, deduplicates by `feishu_app_id + message_id`, and replies to `/help` and `/whoami`.
+- Not done yet: Feishu WebSocket worker, user binding management flow, resource commands, and cards.
 
 Verification:
 
-- `.\.venv\Scripts\python.exe -m pytest`: 42 passed.
+- `.\.venv\Scripts\python.exe -m pytest`: 45 passed.
 - `.\.venv\Scripts\python.exe -m ruff check .`: passed.
 - SQLite Alembic `upgrade head`: passed.
 - `npm.cmd run build`: passed with existing Vite chunk size warning.
