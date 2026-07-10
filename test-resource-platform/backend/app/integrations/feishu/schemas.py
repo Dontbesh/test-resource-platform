@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.identity.schemas import UserPublic
 from app.integrations.feishu.models import (
     FeishuAppStatus,
     FeishuPlatformType,
@@ -56,5 +57,22 @@ class FeishuAppPublic(BaseModel):
     last_error: str | None
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FeishuUserBindingCreateRequest(BaseModel):
+    open_id: str = Field(min_length=1, max_length=128)
+    platform_username: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=128)
+
+
+class FeishuUserBindingPublic(BaseModel):
+    id: int
+    feishu_app_id: int
+    open_id: str
+    display_name: str | None
+    platform_user: UserPublic
+    created_at: datetime
 
     model_config = {"from_attributes": True}

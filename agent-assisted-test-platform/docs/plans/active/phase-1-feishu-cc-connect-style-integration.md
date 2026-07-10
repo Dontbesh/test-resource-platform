@@ -306,11 +306,12 @@ Manual:
 - Done: Feishu message handling core records inbound message events, deduplicates by `feishu_app_id + message_id`, and replies to `/help` and `/whoami`.
 - Done: Feishu message dispatch can decrypt saved app credentials and send text replies through Feishu Reply Message API; duplicate messages do not send duplicate replies.
 - Done: bound Feishu users can run deterministic resource commands in the message core: `/machines`, `/machines free`, `/lease`, `/my-leases`, `/release`, and `/extend`.
-- Not done yet: Feishu WebSocket worker, user binding management flow, and cards.
+- Done: `ADMIN` / `TSE` can manage Feishu `open_id` to platform user bindings from API and the Feishu integration page.
+- Not done yet: Feishu WebSocket worker and cards.
 
 Verification:
 
-- `.\.venv\Scripts\python.exe -m pytest`: 51 passed.
+- `.\.venv\Scripts\python.exe -m pytest`: 55 passed.
 - `.\.venv\Scripts\python.exe -m ruff check .`: passed.
 - SQLite Alembic `upgrade head`: passed.
 - `npm.cmd run build`: passed with existing Vite chunk size warning.

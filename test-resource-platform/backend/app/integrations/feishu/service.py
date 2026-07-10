@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
 from app.identity.models import User
+from app.identity.service import get_user_by_username
 from app.integrations.feishu.client import FeishuClientError, fetch_feishu_bot_info
 from app.integrations.feishu.models import (
     FeishuApp,
@@ -12,6 +13,7 @@ from app.integrations.feishu.models import (
     FeishuPlatformType,
     FeishuSetupSession,
     FeishuSetupStatus,
+    FeishuUserBinding,
 )
 from app.integrations.feishu.registration import (
     FEISHU_ACCOUNTS_BASE_URL,
@@ -22,6 +24,7 @@ from app.integrations.feishu.schemas import (
     FeishuSetupBeginResponse,
     FeishuSetupPollResponse,
     FeishuSetupSaveRequest,
+    FeishuUserBindingCreateRequest,
 )
 
 
@@ -38,6 +41,14 @@ class FeishuAppNotFoundError(Exception):
 
 
 class FeishuConnectionCheckError(Exception):
+    pass
+
+
+class FeishuPlatformUserNotFoundError(Exception):
+    pass
+
+
+class FeishuBindingNotFoundError(Exception):
     pass
 
 
@@ -230,6 +241,60 @@ def check_feishu_app_connection(
     app.last_error = None
     session.flush()
     return app
+
+
+def list_feishu_user_bindings(session: Session, app_id: int) -> list[FeishuUserBinding]:
+    app = session.get(FeishuApp, app_id)
+    if app is None:
+        raise FeishuAppNotFoundError
+    return list(
+        session.scalars(
+            select(FeishuUserBinding)
+            .where(FeishuUserBinding.feishu_app_id == app_id)
+            .order_by(FeishuUserBinding.id)
+        )
+    )
+
+
+def create_or_update_feishu_user_binding(
+    session: Session,
+    app_id: int,
+    body: FeishuUserBindingCreateRequest,
+) -> FeishuUserBinding:
+    app = session.get(FeishuApp, app_id)
+    if app is None:
+        raise FeishuAppNotFoundError
+    platform_user = get_user_by_username(session, body.platform_username)
+    if platform_user is None or not platform_user.is_active:
+        raise FeishuPlatformUserNotFoundError
+
+    binding = session.scalar(
+        select(FeishuUserBinding).where(
+            FeishuUserBinding.feishu_app_id == app_id,
+            FeishuUserBinding.open_id == body.open_id,
+        )
+    )
+    if binding is None:
+        binding = FeishuUserBinding(
+            feishu_app_id=app_id,
+            platform_user_id=platform_user.id,
+            open_id=body.open_id,
+            display_name=body.display_name,
+        )
+        session.add(binding)
+    else:
+        binding.platform_user_id = platform_user.id
+        binding.display_name = body.display_name
+    session.flush()
+    return binding
+
+
+def delete_feishu_user_binding(session: Session, binding_id: int) -> None:
+    binding = session.get(FeishuUserBinding, binding_id)
+    if binding is None:
+        raise FeishuBindingNotFoundError
+    session.delete(binding)
+    session.flush()
 
 
 def raise_if_remote_error(response: dict, action: str) -> None:

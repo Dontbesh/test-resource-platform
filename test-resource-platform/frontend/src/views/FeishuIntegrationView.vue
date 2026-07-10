@@ -71,6 +71,38 @@
           <n-data-table :columns="columns" :data="apps" :loading="loadingApps" :row-key="rowKey" />
         </section>
       </div>
+
+      <section class="bindings-panel">
+        <div class="panel-header">
+          <div>
+            <h2>用户绑定</h2>
+            <p>把飞书 open_id 绑定到平台用户后，飞书资源命令才能执行。</p>
+          </div>
+          <n-button secondary :loading="loadingBindings" :disabled="!selectedAppId" @click="loadBindings">
+            刷新
+          </n-button>
+        </div>
+        <div class="binding-form">
+          <n-select
+            v-model:value="selectedAppId"
+            :options="appOptions"
+            placeholder="选择飞书应用"
+            @update:value="loadBindings"
+          />
+          <n-input v-model:value="bindingForm.open_id" placeholder="飞书 open_id" />
+          <n-input v-model:value="bindingForm.platform_username" placeholder="平台用户名" />
+          <n-input v-model:value="bindingForm.display_name" placeholder="显示名（可选）" />
+          <n-button type="primary" :loading="savingBinding" :disabled="!selectedAppId" @click="saveBinding">
+            保存绑定
+          </n-button>
+        </div>
+        <n-data-table
+          :columns="bindingColumns"
+          :data="bindings"
+          :loading="loadingBindings"
+          :row-key="bindingRowKey"
+        />
+      </section>
     </section>
   </main>
 </template>
@@ -84,12 +116,16 @@ import { useRouter } from 'vue-router';
 import {
   beginFeishuSetup,
   checkFeishuAppConnection,
+  createFeishuUserBinding,
+  deleteFeishuUserBinding,
   listFeishuApps,
+  listFeishuUserBindings,
   pollFeishuSetup,
   saveFeishuSetup,
   type FeishuAppPublic,
   type FeishuSetupBeginResponse,
-  type FeishuSetupStatus
+  type FeishuSetupStatus,
+  type FeishuUserBindingPublic
 } from '@/api/feishuIntegration';
 import { useAuthStore } from '@/stores/auth';
 
@@ -108,6 +144,16 @@ const savedApp = ref<FeishuAppPublic | null>(null);
 const apps = ref<FeishuAppPublic[]>([]);
 const loadingApps = ref(false);
 const checkingAppIds = ref(new Set<number>());
+const selectedAppId = ref<number | null>(null);
+const bindings = ref<FeishuUserBindingPublic[]>([]);
+const loadingBindings = ref(false);
+const savingBinding = ref(false);
+const deletingBindingIds = ref(new Set<number>());
+const bindingForm = ref({
+  open_id: '',
+  platform_username: '',
+  display_name: ''
+});
 let pollTimer: number | undefined;
 
 const qrImageUrl = computed(() => {
@@ -145,6 +191,13 @@ const phaseTagType = computed(() => {
   }
   return 'info';
 });
+
+const appOptions = computed(() =>
+  apps.value.map((app) => ({
+    label: `${app.name} (${app.app_id})`,
+    value: app.id
+  }))
+);
 
 const columns: DataTableColumns<FeishuAppPublic> = [
   { title: 'ID', key: 'id', width: 80 },
@@ -193,7 +246,54 @@ const columns: DataTableColumns<FeishuAppPublic> = [
   }
 ];
 
+const bindingColumns: DataTableColumns<FeishuUserBindingPublic> = [
+  { title: 'Open ID', key: 'open_id' },
+  {
+    title: '平台用户',
+    key: 'platform_user',
+    render(row) {
+      return `${row.platform_user.username} (${row.platform_user.role})`;
+    }
+  },
+  {
+    title: '显示名',
+    key: 'display_name',
+    render(row) {
+      return row.display_name ?? '-';
+    }
+  },
+  {
+    title: '创建时间',
+    key: 'created_at',
+    render(row) {
+      return formatDateTime(row.created_at);
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 100,
+    render(row) {
+      return h(
+        NButton,
+        {
+          size: 'small',
+          tertiary: true,
+          type: 'error',
+          loading: deletingBindingIds.value.has(row.id),
+          onClick: () => deleteBinding(row.id)
+        },
+        { default: () => '删除' }
+      );
+    }
+  }
+];
+
 function rowKey(row: FeishuAppPublic) {
+  return row.id;
+}
+
+function bindingRowKey(row: FeishuUserBindingPublic) {
   return row.id;
 }
 
@@ -278,10 +378,69 @@ async function loadApps() {
   loadingApps.value = true;
   try {
     apps.value = await listFeishuApps();
+    if (!selectedAppId.value && apps.value.length > 0) {
+      selectedAppId.value = apps.value[0].id;
+      await loadBindings();
+    }
   } catch (err) {
     message.error(err instanceof Error ? err.message : '加载飞书应用失败');
   } finally {
     loadingApps.value = false;
+  }
+}
+
+async function loadBindings() {
+  if (!selectedAppId.value) {
+    bindings.value = [];
+    return;
+  }
+  loadingBindings.value = true;
+  try {
+    bindings.value = await listFeishuUserBindings(selectedAppId.value);
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '加载飞书用户绑定失败');
+  } finally {
+    loadingBindings.value = false;
+  }
+}
+
+async function saveBinding() {
+  if (!selectedAppId.value) {
+    return;
+  }
+  if (!bindingForm.value.open_id.trim() || !bindingForm.value.platform_username.trim()) {
+    message.error('请填写飞书 open_id 和平台用户名');
+    return;
+  }
+  savingBinding.value = true;
+  try {
+    await createFeishuUserBinding(selectedAppId.value, {
+      open_id: bindingForm.value.open_id.trim(),
+      platform_username: bindingForm.value.platform_username.trim(),
+      display_name: bindingForm.value.display_name.trim() || null
+    });
+    bindingForm.value = { open_id: '', platform_username: '', display_name: '' };
+    message.success('飞书用户绑定已保存');
+    await loadBindings();
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '保存飞书用户绑定失败');
+  } finally {
+    savingBinding.value = false;
+  }
+}
+
+async function deleteBinding(bindingId: number) {
+  deletingBindingIds.value = new Set(deletingBindingIds.value).add(bindingId);
+  try {
+    await deleteFeishuUserBinding(bindingId);
+    message.success('飞书用户绑定已删除');
+    await loadBindings();
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '删除飞书用户绑定失败');
+  } finally {
+    const next = new Set(deletingBindingIds.value);
+    next.delete(bindingId);
+    deletingBindingIds.value = next;
   }
 }
 
@@ -382,10 +541,22 @@ p {
 }
 
 .setup-panel,
-.apps-panel {
+.apps-panel,
+.bindings-panel {
   border: 1px solid #d9e1e8;
   border-radius: 8px;
   padding: 20px;
+}
+
+.bindings-panel {
+  margin-top: 20px;
+}
+
+.binding-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 1fr) minmax(140px, 0.8fr) minmax(140px, 0.8fr) auto;
+  gap: 12px;
+  margin: 18px 0;
 }
 
 .empty-state,
@@ -449,6 +620,10 @@ p {
   }
 
   .setup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .binding-form {
     grid-template-columns: 1fr;
   }
 }

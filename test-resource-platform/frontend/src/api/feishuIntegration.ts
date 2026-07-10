@@ -48,6 +48,26 @@ export type FeishuAppPublic = {
   updated_at: string;
 };
 
+export type FeishuUserBindingPublic = {
+  id: number;
+  feishu_app_id: number;
+  open_id: string;
+  display_name: string | null;
+  platform_user: {
+    id: number;
+    username: string;
+    role: string;
+    is_active: boolean;
+  };
+  created_at: string;
+};
+
+export type FeishuUserBindingCreateRequest = {
+  open_id: string;
+  platform_username: string;
+  display_name: string | null;
+};
+
 export async function beginFeishuSetup(): Promise<FeishuSetupBeginResponse> {
   const response = await fetch('/api/v1/integrations/feishu/setup/begin', {
     method: 'POST',
@@ -96,4 +116,38 @@ export async function checkFeishuAppConnection(appId: number): Promise<FeishuApp
     credentials: 'include'
   });
   return parseResponse<FeishuAppPublic>(response);
+}
+
+export async function listFeishuUserBindings(appId: number): Promise<FeishuUserBindingPublic[]> {
+  const response = await fetch(`/api/v1/integrations/feishu/apps/${appId}/bindings`, {
+    credentials: 'include'
+  });
+  return parseResponse<FeishuUserBindingPublic[]>(response);
+}
+
+export async function createFeishuUserBinding(
+  appId: number,
+  body: FeishuUserBindingCreateRequest
+): Promise<FeishuUserBindingPublic> {
+  const response = await fetch(`/api/v1/integrations/feishu/apps/${appId}/bindings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    credentials: 'include',
+    body: JSON.stringify(body)
+  });
+  return parseResponse<FeishuUserBindingPublic>(response);
+}
+
+export async function deleteFeishuUserBinding(bindingId: number): Promise<void> {
+  const response = await fetch(`/api/v1/integrations/feishu/bindings/${bindingId}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const errorMessage = body?.detail?.message ?? `Request failed: ${response.status}`;
+    throw new Error(errorMessage);
+  }
 }

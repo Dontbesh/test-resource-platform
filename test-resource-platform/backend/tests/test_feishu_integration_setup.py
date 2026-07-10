@@ -8,7 +8,12 @@ from app.core.config import get_settings
 from app.credentials.crypto import CredentialCipher
 from app.db.session import get_engine, get_session_factory
 from app.integrations.feishu.client import FeishuBotInfo
-from app.integrations.feishu.models import FeishuApp, FeishuSetupSession, FeishuSetupStatus
+from app.integrations.feishu.models import (
+    FeishuApp,
+    FeishuSetupSession,
+    FeishuSetupStatus,
+    FeishuUserBinding,
+)
 from app.main import create_app
 
 TEST_FERNET_KEY = "P4hnnBWP4qB-txrlIG20aQRk0RxEholITHKAcC3atkY="
@@ -312,5 +317,137 @@ def test_te_cannot_check_feishu_app_connection(client) -> None:
     login(client, "tester", "Tester@123456")
 
     response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/check-connection")
+
+    assert response.status_code == 403
+
+
+def test_admin_can_create_and_list_feishu_user_binding(client) -> None:
+    login(client, "admin", "Admin@123456")
+    create_user(client, "tester", "Tester@123456", "TE")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_binding",
+            "app_secret": "sec_binding",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    create_response = client.post(
+        f"/api/v1/integrations/feishu/apps/{app_id}/bindings",
+        json={
+            "open_id": "ou_tester",
+            "platform_username": "tester",
+            "display_name": "Tester Feishu",
+        },
+    )
+    list_response = client.get(f"/api/v1/integrations/feishu/apps/{app_id}/bindings")
+
+    assert create_response.status_code == 201
+    body = create_response.json()
+    assert body["open_id"] == "ou_tester"
+    assert body["display_name"] == "Tester Feishu"
+    assert body["platform_user"]["username"] == "tester"
+    assert body["platform_user"]["role"] == "TE"
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["open_id"] == "ou_tester"
+
+
+def test_create_feishu_user_binding_rejects_unknown_user(client) -> None:
+    login(client, "admin", "Admin@123456")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_unknown_binding",
+            "app_secret": "sec_unknown_binding",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    response = client.post(
+        f"/api/v1/integrations/feishu/apps/{app_id}/bindings",
+        json={
+            "open_id": "ou_missing",
+            "platform_username": "missing",
+            "display_name": None,
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error_code"] == "PLATFORM_USER_NOT_FOUND"
+
+
+def test_create_feishu_user_binding_upserts_existing_open_id(client) -> None:
+    login(client, "admin", "Admin@123456")
+    create_user(client, "tester", "Tester@123456", "TE")
+    save_response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "lab assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_binding_upsert",
+            "app_secret": "sec_binding_upsert",
+        },
+    )
+    app_id = save_response.json()["id"]
+
+    client.post(
+        f"/api/v1/integrations/feishu/apps/{app_id}/bindings",
+        json={
+            "open_id": "ou_tester",
+            "platform_username": "tester",
+            "display_name": "Before",
+        },
+    )
+    update_response = client.post(
+        f"/api/v1/integrations/feishu/apps/{app_id}/bindings",
+        json={
+            "open_id": "ou_tester",
+            "platform_username": "admin",
+            "display_name": "After",
+        },
+    )
+
+    assert update_response.status_code == 201
+    body = update_response.json()
+    assert body["display_name"] == "After"
+    assert body["platform_user"]["username"] == "admin"
+    session_factory = get_session_factory(get_settings().database_url)
+    with session_factory() as session:
+        bindings = list(session.scalars(select(FeishuUserBinding)))
+        assert len(bindings) == 1
+
+
+def test_te_cannot_create_feishu_user_binding(client) -> None:
+    login(client, "admin", "Admin@123456")
+    create_user(client, "tester", "Tester@123456", "TE")
+    cipher = CredentialCipher(TEST_FERNET_KEY)
+    session_factory = get_session_factory(get_settings().database_url)
+    with session_factory() as session:
+        app = FeishuApp(
+            name="lab assistant",
+            platform_type="FEISHU",
+            app_id="cli_binding_forbidden",
+            encrypted_app_secret=cipher.encrypt("sec_forbidden") or "",
+            created_by_user_id=1,
+        )
+        session.add(app)
+        session.commit()
+        app_id = app.id
+    client.post("/api/v1/auth/logout")
+    login(client, "tester", "Tester@123456")
+
+    response = client.post(
+        f"/api/v1/integrations/feishu/apps/{app_id}/bindings",
+        json={
+            "open_id": "ou_tester",
+            "platform_username": "tester",
+            "display_name": "Tester",
+        },
+    )
 
     assert response.status_code == 403

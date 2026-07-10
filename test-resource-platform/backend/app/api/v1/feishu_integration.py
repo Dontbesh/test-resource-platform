@@ -15,15 +15,22 @@ from app.integrations.feishu.schemas import (
     FeishuSetupPollRequest,
     FeishuSetupPollResponse,
     FeishuSetupSaveRequest,
+    FeishuUserBindingCreateRequest,
+    FeishuUserBindingPublic,
 )
 from app.integrations.feishu.service import (
     FeishuAppNotFoundError,
+    FeishuBindingNotFoundError,
     FeishuConnectionCheckError,
+    FeishuPlatformUserNotFoundError,
     FeishuSetupError,
     FeishuSetupSessionNotFoundError,
     begin_feishu_setup,
     check_feishu_app_connection,
+    create_or_update_feishu_user_binding,
+    delete_feishu_user_binding,
     list_feishu_apps,
+    list_feishu_user_bindings,
     poll_feishu_setup,
     save_feishu_app,
 )
@@ -125,6 +132,55 @@ def check_app_connection(
         raise_feishu_connection_check_failed(str(exc))
 
 
+@router.get("/apps/{app_id}/bindings", response_model=list[FeishuUserBindingPublic])
+def list_app_bindings(
+    app_id: int,
+    _: Annotated[User, Depends(require_feishu_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> list:
+    try:
+        return list_feishu_user_bindings(session, app_id)
+    except FeishuAppNotFoundError:
+        raise_feishu_app_not_found()
+
+
+@router.post(
+    "/apps/{app_id}/bindings",
+    response_model=FeishuUserBindingPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_app_binding(
+    app_id: int,
+    body: FeishuUserBindingCreateRequest,
+    _: Annotated[User, Depends(require_feishu_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> FeishuUserBindingPublic:
+    try:
+        binding = create_or_update_feishu_user_binding(session, app_id, body)
+        session.commit()
+        return binding
+    except FeishuAppNotFoundError:
+        session.rollback()
+        raise_feishu_app_not_found()
+    except FeishuPlatformUserNotFoundError:
+        session.rollback()
+        raise_platform_user_not_found()
+
+
+@router.delete("/bindings/{binding_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_app_binding(
+    binding_id: int,
+    _: Annotated[User, Depends(require_feishu_maintainer)],
+    session: Annotated[Session, Depends(get_db)],
+) -> None:
+    try:
+        delete_feishu_user_binding(session, binding_id)
+        session.commit()
+    except FeishuBindingNotFoundError:
+        session.rollback()
+        raise_feishu_binding_not_found()
+
+
 def raise_feishu_setup_failed(message: str) -> None:
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
@@ -158,6 +214,26 @@ def raise_feishu_connection_check_failed(message: str) -> None:
         detail={
             "error_code": "FEISHU_CONNECTION_CHECK_FAILED",
             "message": message,
+        },
+    )
+
+
+def raise_platform_user_not_found() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "error_code": "PLATFORM_USER_NOT_FOUND",
+            "message": "Platform user not found or inactive.",
+        },
+    )
+
+
+def raise_feishu_binding_not_found() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "error_code": "FEISHU_BINDING_NOT_FOUND",
+            "message": "Feishu user binding not found.",
         },
     )
 
