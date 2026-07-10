@@ -97,7 +97,7 @@ http://localhost:5173/login
 
 生产或共享测试环境必须修改默认密码和 `SESSION_SECRET_KEY`。
 
-凭据功能需要配置 Fernet 加密密钥：
+凭据功能和飞书应用 `app_secret` 保存需要配置 Fernet 加密密钥：
 
 ```text
 CREDENTIAL_ENCRYPTION_KEY=<fernet-key>
@@ -130,7 +130,7 @@ npm run build
 
 ## 当前边界
 
-当前已包含工程链路、Web 登录、`ADMIN` 用户管理、基础接口级 RBAC、资源池、机器台账、资源租约最小闭环、机器凭据基础能力和按需连通性检查。
+当前已包含工程链路、Web 登录、`ADMIN` 用户管理、基础接口级 RBAC、资源池、机器台账、资源租约最小闭环、机器凭据基础能力、按需连通性检查和飞书应用扫码配置基础。
 
 `ADMIN` 登录后可从后台首页进入用户管理页，创建 `ADMIN` / `TSE` / `TE` 用户、禁用用户和重置密码。
 
@@ -141,6 +141,8 @@ npm run build
 `ADMIN` / `TSE` 可为机器配置 SSH/BMC 凭据，敏感字段会加密入库。普通机器凭据仅 `ADMIN` 或当前有效租约占用人可查看；关键机器凭据仅 `ADMIN` 可查看。每次成功查看凭据都会写入后端审计表。
 
 登录用户可对机器执行按需连通性检查，首版检查 SSH 端口和 BMC HTTPS 端口。
+
+`ADMIN` / `TSE` 可从后台首页进入飞书接入页，参考 cc-connect 的扫码流程创建/绑定飞书应用，并将 `app_id/app_secret` 保存到平台数据库。`app_secret` 会使用 `CREDENTIAL_ENCRYPTION_KEY` 加密保存。当前版本只完成应用配置保存，尚未启动飞书 WebSocket 长连接，也尚未处理飞书消息命令。
 
 资源租约相关接口：
 
@@ -157,4 +159,11 @@ npm run build
 - `GET /api/v1/machines/{resource_code}/credentials`
 - `POST /api/v1/machines/{resource_code}/connectivity-checks`
 
-当前尚未包含 PAT 生命周期、CSV 导入、通用审计查询页面、真实远程命令执行和 IPMI/Redfish 电源操作。
+飞书接入配置相关接口：
+
+- `POST /api/v1/integrations/feishu/setup/begin`
+- `POST /api/v1/integrations/feishu/setup/poll`
+- `POST /api/v1/integrations/feishu/setup/save`
+- `GET /api/v1/integrations/feishu/apps`
+
+当前尚未包含 PAT 生命周期、CSV 导入、通用审计查询页面、飞书 WebSocket 长连接、飞书消息命令处理、真实远程命令执行和 IPMI/Redfish 电源操作。

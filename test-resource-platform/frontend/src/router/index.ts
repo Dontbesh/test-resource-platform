@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
 import DashboardView from '@/views/DashboardView.vue';
+import FeishuIntegrationView from '@/views/FeishuIntegrationView.vue';
 import HealthView from '@/views/HealthView.vue';
 import LoginView from '@/views/LoginView.vue';
 import ResourceInventoryView from '@/views/ResourceInventoryView.vue';
@@ -31,6 +32,12 @@ const router = createRouter({
       name: 'resources',
       component: ResourceInventoryView,
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/integrations/feishu',
+      name: 'feishu-integration',
+      component: FeishuIntegrationView,
+      meta: { requiresAuth: true, roles: ['ADMIN', 'TSE'] }
     },
     {
       path: '/login',

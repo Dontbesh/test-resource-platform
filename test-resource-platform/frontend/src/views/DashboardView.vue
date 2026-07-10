@@ -19,6 +19,12 @@
             </template>
             用户管理
           </n-button>
+          <n-button v-if="canMaintainIntegrations" secondary @click="router.push('/integrations/feishu')">
+            <template #icon>
+              <n-icon><PlugConnected24Regular /></n-icon>
+            </template>
+            飞书接入
+          </n-button>
           <n-tag type="info">{{ auth.user?.role }}</n-tag>
           <span>{{ auth.user?.username }}</span>
           <n-button secondary @click="handleLogout">登出</n-button>
@@ -33,13 +39,17 @@
 </template>
 
 <script setup lang="ts">
-import { People24Regular, Server24Regular } from '@vicons/fluent';
+import { computed } from 'vue';
+import { People24Regular, PlugConnected24Regular, Server24Regular } from '@vicons/fluent';
 import { useRouter } from 'vue-router';
 
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
+const canMaintainIntegrations = computed(
+  () => auth.user?.role === 'ADMIN' || auth.user?.role === 'TSE'
+);
 
 async function handleLogout() {
   await auth.logout();
