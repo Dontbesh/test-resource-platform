@@ -305,11 +305,12 @@ Manual:
 - Done: `feishu_user_bindings` and `feishu_message_events` runtime tables with Alembic migration.
 - Done: Feishu message handling core records inbound message events, deduplicates by `feishu_app_id + message_id`, and replies to `/help` and `/whoami`.
 - Done: Feishu message dispatch can decrypt saved app credentials and send text replies through Feishu Reply Message API; duplicate messages do not send duplicate replies.
-- Not done yet: Feishu WebSocket worker, user binding management flow, resource commands, and cards.
+- Done: bound Feishu users can run deterministic resource commands in the message core: `/machines`, `/machines free`, `/lease`, `/my-leases`, `/release`, and `/extend`.
+- Not done yet: Feishu WebSocket worker, user binding management flow, and cards.
 
 Verification:
 
-- `.\.venv\Scripts\python.exe -m pytest`: 48 passed.
+- `.\.venv\Scripts\python.exe -m pytest`: 51 passed.
 - `.\.venv\Scripts\python.exe -m ruff check .`: passed.
 - SQLite Alembic `upgrade head`: passed.
 - `npm.cmd run build`: passed with existing Vite chunk size warning.
