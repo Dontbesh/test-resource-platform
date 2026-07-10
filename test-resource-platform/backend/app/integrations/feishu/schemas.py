@@ -61,6 +61,13 @@ class FeishuAppPublic(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FeishuBindingCodePublic(BaseModel):
+    code: str
+    expires_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class FeishuUserBindingCreateRequest(BaseModel):
     open_id: str = Field(min_length=1, max_length=128)
     platform_username: str = Field(min_length=1, max_length=64)

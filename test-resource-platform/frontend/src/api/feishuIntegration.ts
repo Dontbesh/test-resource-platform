@@ -68,6 +68,11 @@ export type FeishuUserBindingCreateRequest = {
   display_name: string | null;
 };
 
+export type FeishuBindingCodePublic = {
+  code: string;
+  expires_at: string;
+};
+
 export async function beginFeishuSetup(): Promise<FeishuSetupBeginResponse> {
   const response = await fetch('/api/v1/integrations/feishu/setup/begin', {
     method: 'POST',
@@ -108,6 +113,14 @@ export async function listFeishuApps(): Promise<FeishuAppPublic[]> {
     credentials: 'include'
   });
   return parseResponse<FeishuAppPublic[]>(response);
+}
+
+export async function createFeishuBindingCode(): Promise<FeishuBindingCodePublic> {
+  const response = await fetch('/api/v1/integrations/feishu/binding-codes', {
+    method: 'POST',
+    credentials: 'include'
+  });
+  return parseResponse<FeishuBindingCodePublic>(response);
 }
 
 export async function checkFeishuAppConnection(appId: number): Promise<FeishuAppPublic> {

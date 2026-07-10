@@ -8,12 +8,15 @@ from app.core.config import get_settings
 from app.credentials.crypto import CredentialCipher
 from app.db.session import get_engine, get_session_factory
 from app.integrations.feishu.messages import (
+    FeishuCardAction,
     FeishuInboundMessage,
     dispatch_feishu_inbound_message,
+    handle_feishu_card_action,
     handle_feishu_inbound_message,
 )
 from app.integrations.feishu.models import (
     FeishuApp,
+    FeishuBindingCode,
     FeishuMessageEvent,
     FeishuMessageHandledStatus,
     FeishuPlatformType,
@@ -232,6 +235,34 @@ def test_unbound_user_cannot_create_lease_from_feishu(session_factory) -> None:
         assert session.scalar(select(ResourceLease)) is None
 
 
+def test_unbound_user_can_bind_with_web_generated_code(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        session.add(FeishuBindingCode(code="ABC123", platform_user_id=1))
+        session.flush()
+
+        result = handle_feishu_inbound_message(
+            session,
+            inbound(app, "om_bind", "/bind ABC123", sender_open_id="ou_self"),
+        )
+
+        assert result.reply_text is not None
+        assert "绑定成功" in result.reply_text
+        binding = session.scalar(
+            select(FeishuUserBinding).where(
+                FeishuUserBinding.feishu_app_id == app.id,
+                FeishuUserBinding.open_id == "ou_self",
+            )
+        )
+        assert binding is not None
+        assert binding.platform_user.username == "admin"
+        binding_code = session.scalar(
+            select(FeishuBindingCode).where(FeishuBindingCode.code == "ABC123")
+        )
+        assert binding_code is not None
+        assert binding_code.consumed_at is not None
+
+
 def test_bound_user_can_list_free_machines_and_create_lease(session_factory) -> None:
     with session_factory() as session:
         app = create_feishu_app(session)
@@ -260,6 +291,61 @@ def test_bound_user_can_list_free_machines_and_create_lease(session_factory) -> 
         assert lease_result.reply_text is not None
         assert "占用成功" in lease_result.reply_text
         assert "machine-01" in lease_result.reply_text
+        lease = session.scalar(
+            select(ResourceLease).join(MachineResource).where(
+                MachineResource.resource_code == "machine-01"
+            )
+        )
+        assert lease is not None
+        assert lease.status == LeaseStatus.ACTIVE
+        assert lease.user_id == 1
+
+
+def test_free_machine_command_builds_interactive_card(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        create_machine(session, "machine-01")
+        create_machine(session, "machine-02")
+
+        result = handle_feishu_inbound_message(
+            session,
+            inbound(app, "om_free_card", "/machines free"),
+        )
+
+        assert result.reply_text is not None
+        assert result.reply_card is not None
+        card_json = json.dumps(result.reply_card, ensure_ascii=False)
+        assert "空闲机器" in card_json
+        assert "machine-01" in card_json
+        assert "machine-02" in card_json
+        assert '"action": "lease"' in card_json
+        assert '"duration_minutes": 60' in card_json
+
+
+def test_card_lease_action_creates_lease_for_bound_user(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        create_machine(session, "machine-01")
+
+        result = handle_feishu_card_action(
+            session,
+            FeishuCardAction(
+                feishu_app_id=app.id,
+                operator_open_id="ou_user",
+                action_value={
+                    "action": "lease",
+                    "resource_code": "machine-01",
+                    "duration_minutes": 60,
+                    "purpose": "feishu-card",
+                },
+                raw_event={"event": {"action": {"value": {"action": "lease"}}}},
+            ),
+        )
+
+        assert result.reply_text is not None
+        assert "machine-01" in result.reply_text
         lease = session.scalar(
             select(ResourceLease).join(MachineResource).where(
                 MachineResource.resource_code == "machine-01"

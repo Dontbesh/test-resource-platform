@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth.authorization import require_roles
-from app.auth.dependencies import get_db
+from app.auth.dependencies import get_current_user, get_db
 from app.core.config import get_settings
 from app.credentials.crypto import CredentialCipher, CredentialEncryptionKeyError
 from app.identity.models import User, UserRole
 from app.integrations.feishu.registration import FeishuRegistrationError
 from app.integrations.feishu.schemas import (
     FeishuAppPublic,
+    FeishuBindingCodePublic,
     FeishuSetupBeginResponse,
     FeishuSetupPollRequest,
     FeishuSetupPollResponse,
@@ -28,6 +29,7 @@ from app.integrations.feishu.service import (
     FeishuWorkerError,
     begin_feishu_setup,
     check_feishu_app_connection,
+    create_feishu_binding_code,
     create_or_update_feishu_user_binding,
     delete_feishu_user_binding,
     list_feishu_apps,
@@ -108,6 +110,24 @@ def list_apps(
     session: Annotated[Session, Depends(get_db)],
 ) -> list:
     return list_feishu_apps(session)
+
+
+@router.post(
+    "/binding-codes",
+    response_model=FeishuBindingCodePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_binding_code(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_db)],
+) -> FeishuBindingCodePublic:
+    try:
+        binding_code = create_feishu_binding_code(session, current_user)
+        session.commit()
+        return binding_code
+    except FeishuSetupError as exc:
+        session.rollback()
+        raise_feishu_setup_failed(str(exc))
 
 
 @router.post("/apps/{app_id}/check-connection", response_model=FeishuAppPublic)

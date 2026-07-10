@@ -1,4 +1,4 @@
-from app.integrations.feishu.worker import lark_event_to_inbound_message
+from app.integrations.feishu.worker import lark_event_to_card_action, lark_event_to_inbound_message
 
 
 def test_lark_message_event_is_converted_to_inbound_message() -> None:
@@ -23,3 +23,26 @@ def test_lark_message_event_is_converted_to_inbound_message() -> None:
     assert inbound.message_type == "text"
     assert inbound.text == "/help"
     assert inbound.raw_event == event
+
+
+def test_lark_card_action_event_is_converted_to_card_action() -> None:
+    event = {
+        "event": {
+            "operator": {"open_id": "ou_user"},
+            "action": {
+                "value": {
+                    "action": "lease",
+                    "resource_code": "machine-01",
+                    "duration_minutes": 60,
+                }
+            },
+        }
+    }
+
+    action = lark_event_to_card_action(7, event)
+
+    assert action.feishu_app_id == 7
+    assert action.operator_open_id == "ou_user"
+    assert action.action_value["action"] == "lease"
+    assert action.action_value["resource_code"] == "machine-01"
+    assert action.raw_event == event

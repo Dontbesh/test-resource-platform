@@ -1,6 +1,6 @@
 import json
 
-from app.integrations.feishu.client import send_feishu_text_reply
+from app.integrations.feishu.client import send_feishu_card_reply, send_feishu_text_reply
 from app.integrations.feishu.models import FeishuPlatformType
 
 
@@ -52,4 +52,31 @@ def test_send_feishu_text_reply_posts_text_reply(monkeypatch) -> None:
     assert json.loads(reply_request.data.decode("utf-8")) == {
         "msg_type": "text",
         "content": json.dumps({"text": "hello"}, ensure_ascii=False),
+    }
+
+
+def test_send_feishu_card_reply_posts_interactive_reply(monkeypatch) -> None:
+    requests = []
+    card = {"header": {"title": {"tag": "plain_text", "content": "空闲机器"}}}
+
+    def fake_urlopen(request, timeout: int):
+        requests.append(request)
+        if request.full_url.endswith("/open-apis/auth/v3/tenant_access_token/internal"):
+            return FakeHTTPResponse({"code": 0, "tenant_access_token": "tenant-token"})
+        return FakeHTTPResponse({"code": 0, "msg": "ok"})
+
+    monkeypatch.setattr("app.integrations.feishu.client.urlopen", fake_urlopen)
+
+    send_feishu_card_reply(
+        FeishuPlatformType.FEISHU,
+        "cli_test",
+        "sec_test",
+        "om_test",
+        card,
+    )
+
+    _, reply_request = requests
+    assert json.loads(reply_request.data.decode("utf-8")) == {
+        "msg_type": "interactive",
+        "content": json.dumps(card, ensure_ascii=False),
     }

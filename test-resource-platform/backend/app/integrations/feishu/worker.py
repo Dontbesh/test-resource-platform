@@ -8,7 +8,12 @@ from typing import Any, Protocol
 from sqlalchemy.orm import Session
 
 from app.credentials.crypto import CredentialCipher
-from app.integrations.feishu.messages import FeishuInboundMessage, dispatch_feishu_inbound_message
+from app.integrations.feishu.messages import (
+    FeishuCardAction,
+    FeishuInboundMessage,
+    dispatch_feishu_inbound_message,
+    handle_feishu_card_action,
+)
 from app.integrations.feishu.models import FeishuApp
 
 
@@ -198,7 +203,23 @@ def build_lark_event_handler(lark, context: FeishuWorkerContext):
                 session.rollback()
                 raise
 
-    return register(handle_message).build()
+    builder = register(handle_message)
+    card_register = getattr(builder, "register_p2_card_action_trigger", None)
+    if callable(card_register):
+        builder = card_register(lambda event: handle_card_action_event(context, event))
+    return builder.build()
+
+
+def handle_card_action_event(context: FeishuWorkerContext, event: Any) -> dict:
+    action = lark_event_to_card_action(context.app.id, event)
+    with context.session_factory() as session:
+        try:
+            result = handle_feishu_card_action(session, action)
+            session.commit()
+            return {"toast": {"type": "success", "content": result.reply_text or "操作完成"}}
+        except Exception:
+            session.rollback()
+            raise
 
 
 def create_lark_ws_client(lark, app_id: str, app_secret: str, event_handler):
@@ -228,6 +249,24 @@ def lark_event_to_inbound_message(feishu_app_id: int, event: Any) -> FeishuInbou
         sender_open_id=sender_open_id,
         message_type=message_type,
         text=text,
+        raw_event=raw_event,
+    )
+
+
+def lark_event_to_card_action(feishu_app_id: int, event: Any) -> FeishuCardAction:
+    raw_event = to_event_dict(event)
+    operator = get_nested(event, "event", "operator")
+    action = get_nested(event, "event", "action")
+    action_value = get_value(action, "value")
+    operator_open_id = str(get_value(operator, "open_id") or "")
+    if not operator_open_id:
+        raise RuntimeError("Feishu card action event does not contain operator open_id.")
+    if not isinstance(action_value, dict):
+        raise RuntimeError("Feishu card action event does not contain action value.")
+    return FeishuCardAction(
+        feishu_app_id=feishu_app_id,
+        operator_open_id=operator_open_id,
+        action_value=action_value,
         raw_event=raw_event,
     )
 

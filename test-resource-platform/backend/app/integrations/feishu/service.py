@@ -1,3 +1,5 @@
+import secrets
+import string
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -11,6 +13,7 @@ from app.integrations.feishu.client import FeishuClientError, fetch_feishu_bot_i
 from app.integrations.feishu.models import (
     FeishuApp,
     FeishuAppStatus,
+    FeishuBindingCode,
     FeishuPlatformType,
     FeishuSetupSession,
     FeishuSetupStatus,
@@ -220,6 +223,18 @@ def list_feishu_apps(session: Session) -> list[FeishuApp]:
     return list(session.scalars(select(FeishuApp).order_by(FeishuApp.id)))
 
 
+def create_feishu_binding_code(session: Session, user: User) -> FeishuBindingCode:
+    for _ in range(5):
+        code = generate_binding_code()
+        existing = session.scalar(select(FeishuBindingCode).where(FeishuBindingCode.code == code))
+        if existing is None:
+            binding_code = FeishuBindingCode(code=code, platform_user_id=user.id)
+            session.add(binding_code)
+            session.flush()
+            return binding_code
+    raise FeishuSetupError("Failed to generate unique Feishu binding code.")
+
+
 def check_feishu_app_connection(
     session: Session,
     app_id: int,
@@ -374,3 +389,11 @@ def default_app_name(platform_type: FeishuPlatformType) -> str:
     if platform_type == FeishuPlatformType.FEISHU:
         return "Feishu Resource Assistant"
     return "Lark Resource Assistant"
+
+
+def generate_binding_code() -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return "-".join(
+        "".join(secrets.choice(alphabet) for _ in range(3))
+        for _ in range(2)
+    )

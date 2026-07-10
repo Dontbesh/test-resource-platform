@@ -288,8 +288,8 @@ Manual:
 
 ## Open Decisions
 
-- 飞书用户绑定平台用户时，是用平台 Web 登录确认，还是先用 `/bind username` 临时方案。
-- 第一版是否必须做交互卡片，还是先用纯文本命令。
+- Decision: 飞书用户绑定平台用户使用 Web 登录后生成短时一次性绑定码，再在飞书单聊发送 `/bind <code>`，不使用 `/bind username`。
+- Decision: 第一版实现基础交互卡片：`/machines free` 返回空闲机器卡片，卡片按钮携带申请机器 action value，并复用后端卡片动作处理核心。
 - Worker 是随 API 进程启动，还是独立进程/container。
 
 ## Current Progress
@@ -309,11 +309,13 @@ Manual:
 - Done: `ADMIN` / `TSE` can manage Feishu `open_id` to platform user bindings from API and the Feishu integration page.
 - Done: `ADMIN` / `TSE` can manually start and stop a Feishu WebSocket worker for a saved app from API and the Feishu integration page.
 - Done: WebSocket worker uses the Feishu Python SDK runtime adapter, converts message events into `FeishuInboundMessage`, and dispatches through the existing Feishu message command pipeline.
-- Not done yet: Feishu interactive cards.
+- Done: authenticated users can generate short-lived one-time Feishu binding codes from the Feishu page and complete binding with `/bind <code>` in Feishu.
+- Done: `/machines free` can return a basic Feishu interactive card with per-machine lease action values; the backend card action core can create a lease for a bound user.
+- Not done yet: advanced card forms, card refresh, and credential cards.
 
 Verification:
 
-- `.\.venv\Scripts\python.exe -m pytest`: 58 passed.
+- `.\.venv\Scripts\python.exe -m pytest`: 64 passed.
 - `.\.venv\Scripts\python.exe -m ruff check .`: passed.
 - SQLite Alembic `upgrade head`: passed.
 - `npm.cmd run build`: passed with existing Vite chunk size warning.

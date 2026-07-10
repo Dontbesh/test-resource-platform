@@ -1,13 +1,20 @@
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
-from app.integrations.feishu.client import FeishuClientError, send_feishu_text_reply
+from app.integrations.feishu.cards import build_free_machines_card
+from app.integrations.feishu.client import (
+    FeishuClientError,
+    send_feishu_card_reply,
+    send_feishu_text_reply,
+)
 from app.integrations.feishu.models import (
     FeishuApp,
+    FeishuBindingCode,
     FeishuMessageEvent,
     FeishuMessageHandledStatus,
     FeishuUserBinding,
@@ -51,9 +58,18 @@ class FeishuInboundMessage:
 
 
 @dataclass(frozen=True)
+class FeishuCardAction:
+    feishu_app_id: int
+    operator_open_id: str
+    action_value: dict
+    raw_event: dict
+
+
+@dataclass(frozen=True)
 class FeishuMessageResult:
     reply_text: str | None
     duplicate: bool
+    reply_card: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +77,7 @@ class FeishuMessageDispatchResult:
     reply_text: str | None
     duplicate: bool
     reply_sent: bool
+    reply_card: dict | None = None
 
 
 def dispatch_feishu_inbound_message(
@@ -74,6 +91,7 @@ def dispatch_feishu_inbound_message(
             reply_text=result.reply_text,
             duplicate=result.duplicate,
             reply_sent=False,
+            reply_card=result.reply_card,
         )
 
     app = session.get(FeishuApp, inbound.feishu_app_id)
@@ -81,13 +99,22 @@ def dispatch_feishu_inbound_message(
         raise FeishuMessageAppNotFoundError
     try:
         app_secret = cipher.decrypt(app.encrypted_app_secret) or ""
-        send_feishu_text_reply(
-            app.platform_type,
-            app.app_id,
-            app_secret,
-            inbound.message_id,
-            result.reply_text,
-        )
+        if result.reply_card is not None:
+            send_feishu_card_reply(
+                app.platform_type,
+                app.app_id,
+                app_secret,
+                inbound.message_id,
+                result.reply_card,
+            )
+        else:
+            send_feishu_text_reply(
+                app.platform_type,
+                app.app_id,
+                app_secret,
+                inbound.message_id,
+                result.reply_text,
+            )
     except (CredentialDecryptionError, FeishuClientError, RuntimeError) as exc:
         mark_message_event_error(session, inbound, str(exc))
         raise FeishuMessageDispatchError(str(exc)) from exc
@@ -96,7 +123,37 @@ def dispatch_feishu_inbound_message(
         reply_text=result.reply_text,
         duplicate=False,
         reply_sent=True,
+        reply_card=result.reply_card,
     )
+
+
+def handle_feishu_card_action(
+    session: Session,
+    action: FeishuCardAction,
+) -> FeishuMessageResult:
+    action_name = str(action.action_value.get("action") or "")
+    if action_name != "lease":
+        return FeishuMessageResult(reply_text="暂不支持该卡片操作。", duplicate=False)
+
+    resource_code = str(action.action_value.get("resource_code") or "")
+    duration_minutes = int(action.action_value.get("duration_minutes") or 60)
+    purpose = str(action.action_value.get("purpose") or "feishu-card")
+    inbound = FeishuInboundMessage(
+        feishu_app_id=action.feishu_app_id,
+        message_id="card-action",
+        chat_id="card-action",
+        sender_open_id=action.operator_open_id,
+        message_type="interactive",
+        text=f"/lease {resource_code} {duration_minutes} {purpose}",
+        raw_event=action.raw_event,
+    )
+    user = bound_platform_user(session, inbound)
+    if user is None:
+        return FeishuMessageResult(
+            reply_text="请先绑定平台用户后再操作资源。可以先发送 /whoami 查看当前飞书 open_id。",
+            duplicate=False,
+        )
+    return FeishuMessageResult(reply_text=lease_text(session, inbound, user), duplicate=False)
 
 
 def handle_feishu_inbound_message(
@@ -117,6 +174,7 @@ def handle_feishu_inbound_message(
         return FeishuMessageResult(reply_text=None, duplicate=True)
 
     reply_text = build_reply_text(session, inbound)
+    reply_card = build_reply_card(session, inbound)
     event = FeishuMessageEvent(
         feishu_app_id=inbound.feishu_app_id,
         message_id=inbound.message_id,
@@ -129,7 +187,7 @@ def handle_feishu_inbound_message(
     )
     session.add(event)
     session.flush()
-    return FeishuMessageResult(reply_text=reply_text, duplicate=False)
+    return FeishuMessageResult(reply_text=reply_text, duplicate=False, reply_card=reply_card)
 
 
 def mark_message_event_error(session: Session, inbound: FeishuInboundMessage, error: str) -> None:
@@ -154,6 +212,8 @@ def build_reply_text(session: Session, inbound: FeishuInboundMessage) -> str:
         return help_text()
     if command == "/whoami":
         return whoami_text(session, inbound)
+    if command == "/bind":
+        return bind_text(session, inbound, parts)
     if command in {"/machines", "/lease", "/my-leases", "/release", "/extend"}:
         user = bound_platform_user(session, inbound)
         if user is None:
@@ -169,6 +229,15 @@ def build_reply_text(session: Session, inbound: FeishuInboundMessage) -> str:
         if command == "/extend":
             return extend_text(session, parts, user)
     return "暂时只支持确定性快捷命令。\n\n" + help_text()
+
+
+def build_reply_card(session: Session, inbound: FeishuInboundMessage) -> dict | None:
+    parts = inbound.text.strip().split()
+    if len(parts) > 1 and parts[0].lower() == "/machines" and parts[1].lower() == "free":
+        if bound_platform_user(session, inbound) is None:
+            return None
+        return build_free_machines_card(session)
+    return None
 
 
 def help_text() -> str:
@@ -219,6 +288,46 @@ def bound_platform_user(session: Session, inbound: FeishuInboundMessage):
     if binding is None:
         return None
     return binding.platform_user
+
+
+def bind_text(session: Session, inbound: FeishuInboundMessage, parts: list[str]) -> str:
+    if len(parts) != 2:
+        return "格式错误：/bind <code>"
+    code = parts[1].strip().upper()
+    binding_code = session.scalar(
+        select(FeishuBindingCode).where(
+            FeishuBindingCode.code == code,
+            FeishuBindingCode.consumed_at.is_(None),
+        )
+    )
+    now = datetime.now(UTC)
+    if binding_code is None or is_expired(binding_code.expires_at, now):
+        return "绑定失败：绑定码不存在、已使用或已过期。请在 Web 平台重新生成绑定码。"
+
+    binding = session.scalar(
+        select(FeishuUserBinding).where(
+            FeishuUserBinding.feishu_app_id == inbound.feishu_app_id,
+            FeishuUserBinding.open_id == inbound.sender_open_id,
+        )
+    )
+    if binding is None:
+        binding = FeishuUserBinding(
+            feishu_app_id=inbound.feishu_app_id,
+            platform_user_id=binding_code.platform_user_id,
+            open_id=inbound.sender_open_id,
+        )
+        session.add(binding)
+    else:
+        binding.platform_user_id = binding_code.platform_user_id
+    binding_code.consumed_at = now
+    session.flush()
+    return f"绑定成功：当前飞书身份已绑定到平台用户 {binding.platform_user.username}。"
+
+
+def is_expired(expires_at: datetime, now: datetime) -> bool:
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= now
 
 
 def machines_text(session: Session, only_free: bool) -> str:

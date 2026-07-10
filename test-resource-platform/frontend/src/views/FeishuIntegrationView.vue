@@ -18,7 +18,24 @@
         </n-space>
       </div>
 
-      <div class="setup-grid">
+      <section class="self-binding-panel">
+        <div class="panel-header">
+          <div>
+            <h2>我的飞书绑定码</h2>
+            <p>在 Web 平台生成短时绑定码，然后在飞书单聊中发送 /bind 绑定码。</p>
+          </div>
+          <n-button type="primary" :loading="generatingBindingCode" @click="generateBindingCode">
+            生成绑定码
+          </n-button>
+        </div>
+        <div v-if="bindingCode" class="binding-code-box">
+          <strong>{{ bindingCode.code }}</strong>
+          <span>过期时间：{{ formatDateTime(bindingCode.expires_at) }}</span>
+          <n-input :value="`/bind ${bindingCode.code}`" readonly />
+        </div>
+      </section>
+
+      <div v-if="canMaintainIntegrations" class="setup-grid">
         <section class="setup-panel">
           <div class="panel-header">
             <div>
@@ -72,7 +89,7 @@
         </section>
       </div>
 
-      <section class="bindings-panel">
+      <section v-if="canMaintainIntegrations" class="bindings-panel">
         <div class="panel-header">
           <div>
             <h2>用户绑定</h2>
@@ -115,6 +132,7 @@ import { useRouter } from 'vue-router';
 
 import {
   beginFeishuSetup,
+  createFeishuBindingCode,
   checkFeishuAppConnection,
   createFeishuUserBinding,
   deleteFeishuUserBinding,
@@ -124,6 +142,7 @@ import {
   saveFeishuSetup,
   startFeishuAppWorker,
   stopFeishuAppWorker,
+  type FeishuBindingCodePublic,
   type FeishuAppPublic,
   type FeishuSetupBeginResponse,
   type FeishuSetupStatus,
@@ -136,6 +155,9 @@ type Phase = 'idle' | 'loading' | 'scanning' | 'saving' | 'completed' | 'denied'
 const auth = useAuthStore();
 const router = useRouter();
 const message = useMessage();
+const canMaintainIntegrations = computed(
+  () => auth.user?.role === 'ADMIN' || auth.user?.role === 'TSE'
+);
 
 const phase = ref<Phase>('idle');
 const setupSession = ref<FeishuSetupBeginResponse | null>(null);
@@ -153,6 +175,8 @@ const bindings = ref<FeishuUserBindingPublic[]>([]);
 const loadingBindings = ref(false);
 const savingBinding = ref(false);
 const deletingBindingIds = ref(new Set<number>());
+const generatingBindingCode = ref(false);
+const bindingCode = ref<FeishuBindingCodePublic | null>(null);
 const bindingForm = ref({
   open_id: '',
   platform_username: '',
@@ -496,6 +520,18 @@ async function checkConnection(appId: number) {
   }
 }
 
+async function generateBindingCode() {
+  generatingBindingCode.value = true;
+  try {
+    bindingCode.value = await createFeishuBindingCode();
+    message.success('飞书绑定码已生成');
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '生成飞书绑定码失败');
+  } finally {
+    generatingBindingCode.value = false;
+  }
+}
+
 async function startWorker(appId: number) {
   startingWorkerIds.value = new Set(startingWorkerIds.value).add(appId);
   try {
@@ -539,7 +575,11 @@ function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
-onMounted(loadApps);
+onMounted(() => {
+  if (canMaintainIntegrations.value) {
+    void loadApps();
+  }
+});
 onBeforeUnmount(clearPollTimer);
 </script>
 
@@ -608,6 +648,13 @@ p {
   gap: 20px;
 }
 
+.self-binding-panel {
+  border: 1px solid #d9e1e8;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
 .setup-panel,
 .apps-panel,
 .bindings-panel {
@@ -625,6 +672,17 @@ p {
   grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 1fr) minmax(140px, 0.8fr) minmax(140px, 0.8fr) auto;
   gap: 12px;
   margin: 18px 0;
+}
+
+.binding-code-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.binding-code-box strong {
+  font-size: 28px;
+  letter-spacing: 0;
 }
 
 .empty-state,

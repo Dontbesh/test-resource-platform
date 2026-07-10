@@ -10,6 +10,7 @@ from app.db.session import get_engine, get_session_factory
 from app.integrations.feishu.client import FeishuBotInfo
 from app.integrations.feishu.models import (
     FeishuApp,
+    FeishuBindingCode,
     FeishuSetupSession,
     FeishuSetupStatus,
     FeishuUserBinding,
@@ -413,6 +414,28 @@ def test_te_cannot_check_feishu_app_connection(client) -> None:
     response = client.post(f"/api/v1/integrations/feishu/apps/{app_id}/check-connection")
 
     assert response.status_code == 403
+
+
+def test_authenticated_user_can_create_feishu_binding_code(client) -> None:
+    login(client, "admin", "Admin@123456")
+    create_user(client, "tester", "Tester@123456", "TE")
+    client.post("/api/v1/auth/logout")
+    login(client, "tester", "Tester@123456")
+
+    response = client.post("/api/v1/integrations/feishu/binding-codes")
+
+    assert response.status_code == 201
+    body = response.json()
+    assert len(body["code"]) >= 6
+    assert body["expires_at"] is not None
+
+    session_factory = get_session_factory(get_settings().database_url)
+    with session_factory() as session:
+        binding_code = session.scalar(select(FeishuBindingCode))
+        assert binding_code is not None
+        assert binding_code.code == body["code"]
+        assert binding_code.platform_user.username == "tester"
+        assert binding_code.consumed_at is None
 
 
 def test_admin_can_create_and_list_feishu_user_binding(client) -> None:

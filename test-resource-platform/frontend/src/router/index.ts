@@ -37,7 +37,7 @@ const router = createRouter({
       path: '/integrations/feishu',
       name: 'feishu-integration',
       component: FeishuIntegrationView,
-      meta: { requiresAuth: true, roles: ['ADMIN', 'TSE'] }
+      meta: { requiresAuth: true }
     },
     {
       path: '/login',
