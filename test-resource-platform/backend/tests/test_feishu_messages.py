@@ -111,6 +111,11 @@ def test_help_message_records_event_and_replies(session_factory) -> None:
         assert result.reply_card is not None
         card_json = json.dumps(result.reply_card, ensure_ascii=False)
         assert "测试资源平台" in card_json
+        assert "资源概况" in card_json
+        assert "快捷操作" in card_json
+        assert "常用命令" in card_json
+        assert "自然语言助手" in card_json
+        assert '"action": "show_machines"' in card_json
         assert '"action": "show_free_machines"' in card_json
         assert '"action": "show_my_leases"' in card_json
 

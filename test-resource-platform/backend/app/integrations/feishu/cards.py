@@ -7,15 +7,60 @@ from app.resources.models import MachineResource, ResourceAdminStatus, ResourceP
 from app.resources.service import list_machine_resources
 
 
-def build_home_card(user: User | None) -> dict:
+def build_home_card(session: Session, user: User | None) -> dict:
     binding = f"{user.username} · {user.role}" if user is not None else "尚未绑定平台用户"
+    occupancy = list_active_machine_occupancy(session)
+    machines = list_machine_resources(session)
+    free_count = 0
+    for machine in machines:
+        pool = session.get(ResourcePool, machine.pool_id)
+        if machine_is_available(machine, pool, occupancy):
+            free_count += 1
+    active_lease_count = 0
+    if user is not None:
+        active_lease_count = sum(
+            lease.status == LeaseStatus.ACTIVE for lease in list_user_leases(session, user)
+        )
+
+    summary = (
+        f"机器总数：**{len(machines)}**　空闲：**{free_count}**　"
+        f"已占用：**{len(occupancy)}**"
+    )
+    if user is not None:
+        summary += f"\n我的有效租约：**{active_lease_count}**"
+
     return card(
         "测试资源平台",
         [
-            markdown(f"**当前身份：** {binding}\n请选择要进行的操作。"),
+            markdown(f"**当前身份：** {binding}"),
+            markdown(f"**资源概况**\n{summary}"),
+            markdown("**快捷操作**"),
             actions(
+                button("全部机器", "show_machines"),
                 button("空闲机器", "show_free_machines", primary=True),
                 button("我的租约", "show_my_leases"),
+            ),
+            markdown(
+                "\n".join(
+                    [
+                        "**常用命令**",
+                        "`/machines` 查看全部机器",
+                        "`/machines free` 查看空闲机器",
+                        "`/my-leases` 管理我的租约",
+                        "`/whoami` 查看绑定身份",
+                        "`/bind <code>` 绑定平台账号",
+                    ]
+                )
+            ),
+            markdown(
+                "\n".join(
+                    [
+                        "**自然语言助手**",
+                        "也可以直接描述需求，例如：",
+                        "> 帮我找一台空闲的 x86_64 物理机",
+                        "> 我要一台带 25g 标签的机器",
+                    ]
+                )
             ),
         ],
         template="blue",

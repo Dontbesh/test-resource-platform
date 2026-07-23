@@ -233,7 +233,7 @@ def execute_feishu_card_action(
         return FeishuMessageResult(
             reply_text="已取消操作。",
             duplicate=False,
-            reply_card=build_home_card(user),
+            reply_card=build_home_card(session, user),
         )
     if value.action == "show_free_machines":
         return FeishuMessageResult(
@@ -402,7 +402,7 @@ def build_reply(session: Session, inbound: FeishuInboundMessage) -> tuple[str, d
     if not settings.llm_api_key or not settings.llm_model:
         return (
             "LLM 资源助手尚未配置，确定性快捷命令仍可正常使用。\n\n" + help_text(),
-            build_home_card(user),
+            build_home_card(session, user),
         )
     try:
         result = run_assistant_message(
@@ -486,7 +486,7 @@ def build_reply_card(session: Session, inbound: FeishuInboundMessage) -> dict | 
     command = parts[0].lower() if parts else ""
     user = bound_platform_user(session, inbound)
     if command == "/help":
-        return build_home_card(user)
+        return build_home_card(session, user)
     if user is None:
         return None
     if command == "/machines":
