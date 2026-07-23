@@ -108,6 +108,11 @@ def test_help_message_records_event_and_replies(session_factory) -> None:
         assert result.reply_text is not None
         assert "/whoami" in result.reply_text
         assert "/machines" in result.reply_text
+        assert result.reply_card is not None
+        card_json = json.dumps(result.reply_card, ensure_ascii=False)
+        assert "测试资源平台" in card_json
+        assert '"action": "show_free_machines"' in card_json
+        assert '"action": "show_my_leases"' in card_json
 
         event = session.scalar(select(FeishuMessageEvent))
         assert event is not None
@@ -167,6 +172,11 @@ def test_unmatched_bound_message_uses_shared_llm_assistant(
         )
 
         assert result.reply_text == "飞书中找到 server-feishu-x86。"
+        assert result.reply_card is not None
+        card_json = json.dumps(result.reply_card, ensure_ascii=False)
+        assert "智能匹配结果" in card_json
+        assert "server-feishu-x86" in card_json
+        assert '"action": "confirm_lease"' in card_json
 
 
 def test_message_id_is_deduplicated(session_factory) -> None:
@@ -208,22 +218,22 @@ def test_whoami_message_reports_binding_status(session_factory) -> None:
 
 
 def test_dispatch_message_sends_reply_once(session_factory, monkeypatch) -> None:
-    sent: list[dict[str, str]] = []
+    sent: list[dict] = []
 
-    def fake_send_feishu_text_reply(platform_type, app_id, app_secret, message_id, text):
+    def fake_send_feishu_card_reply(platform_type, app_id, app_secret, message_id, card):
         sent.append(
             {
                 "platform_type": platform_type,
                 "app_id": app_id,
                 "app_secret": app_secret,
                 "message_id": message_id,
-                "text": text,
+                "card": card,
             }
         )
 
     monkeypatch.setattr(
-        "app.integrations.feishu.messages.send_feishu_text_reply",
-        fake_send_feishu_text_reply,
+        "app.integrations.feishu.messages.send_feishu_card_reply",
+        fake_send_feishu_card_reply,
     )
     with session_factory() as session:
         app = create_feishu_app(session)
@@ -241,18 +251,18 @@ def test_dispatch_message_sends_reply_once(session_factory, monkeypatch) -> None
         assert sent[0]["app_id"] == "cli_messages"
         assert sent[0]["app_secret"] == "sec_messages"
         assert sent[0]["message_id"] == "om_dispatch"
-        assert "/whoami" in sent[0]["text"]
+        assert "测试资源平台" in json.dumps(sent[0]["card"], ensure_ascii=False)
 
 
 def test_dispatch_duplicate_message_does_not_send_reply(session_factory, monkeypatch) -> None:
     sent: list[str] = []
 
-    def fake_send_feishu_text_reply(platform_type, app_id, app_secret, message_id, text):
+    def fake_send_feishu_card_reply(platform_type, app_id, app_secret, message_id, card):
         sent.append(message_id)
 
     monkeypatch.setattr(
-        "app.integrations.feishu.messages.send_feishu_text_reply",
-        fake_send_feishu_text_reply,
+        "app.integrations.feishu.messages.send_feishu_card_reply",
+        fake_send_feishu_card_reply,
     )
     with session_factory() as session:
         app = create_feishu_app(session)
@@ -369,11 +379,13 @@ def test_free_machine_command_builds_interactive_card(session_factory) -> None:
         assert "空闲机器" in card_json
         assert "machine-01" in card_json
         assert "machine-02" in card_json
-        assert '"action": "lease"' in card_json
+        assert '"action": "confirm_lease"' in card_json
         assert '"duration_minutes": 60' in card_json
 
 
-def test_card_lease_action_creates_lease_for_bound_user(session_factory) -> None:
+def test_card_lease_action_requires_confirmation_before_creating_lease(
+    session_factory,
+) -> None:
     with session_factory() as session:
         app = create_feishu_app(session)
         bind_open_id(session, app)
@@ -385,7 +397,7 @@ def test_card_lease_action_creates_lease_for_bound_user(session_factory) -> None
                 feishu_app_id=app.id,
                 operator_open_id="ou_user",
                 action_value={
-                    "action": "lease",
+                    "action": "confirm_lease",
                     "resource_code": "machine-01",
                     "duration_minutes": 60,
                     "purpose": "feishu-card",
@@ -396,6 +408,38 @@ def test_card_lease_action_creates_lease_for_bound_user(session_factory) -> None
 
         assert result.reply_text is not None
         assert "machine-01" in result.reply_text
+        assert "确认" in result.reply_text
+        assert result.reply_card is not None
+        card_json = json.dumps(result.reply_card, ensure_ascii=False)
+        assert '"action": "execute_lease"' in card_json
+        assert session.scalar(select(ResourceLease)) is None
+
+
+def test_confirmed_card_lease_action_creates_lease_for_bound_user(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        create_machine(session, "machine-01")
+
+        result = handle_feishu_card_action(
+            session,
+            FeishuCardAction(
+                feishu_app_id=app.id,
+                operator_open_id="ou_user",
+                action_value={
+                    "action": "execute_lease",
+                    "resource_code": "machine-01",
+                    "duration_minutes": 60,
+                    "purpose": "feishu-card",
+                },
+                raw_event={"event": {"action": {"value": {"action": "execute_lease"}}}},
+            ),
+        )
+
+        assert result.reply_text is not None
+        assert "占用成功" in result.reply_text
+        assert result.reply_card is not None
+        assert "machine-01" in json.dumps(result.reply_card, ensure_ascii=False)
         lease = session.scalar(
             select(ResourceLease).join(MachineResource).where(
                 MachineResource.resource_code == "machine-01"
@@ -404,6 +448,132 @@ def test_card_lease_action_creates_lease_for_bound_user(session_factory) -> None
         assert lease is not None
         assert lease.status == LeaseStatus.ACTIVE
         assert lease.user_id == 1
+
+
+def test_retried_confirmed_card_action_is_deduplicated(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        create_machine(session, "machine-01")
+        action = FeishuCardAction(
+            feishu_app_id=app.id,
+            operator_open_id="ou_user",
+            action_id="evt_execute_lease_01",
+            action_value={
+                "action": "execute_lease",
+                "resource_code": "machine-01",
+                "duration_minutes": 60,
+                "purpose": "feishu-card",
+            },
+            raw_event={"header": {"event_id": "evt_execute_lease_01"}},
+        )
+
+        first = handle_feishu_card_action(session, action)
+        second = handle_feishu_card_action(session, action)
+
+        assert first.duplicate is False
+        assert second.duplicate is True
+        assert second.reply_text == first.reply_text
+        assert session.scalar(select(func.count()).select_from(ResourceLease)) == 1
+
+
+def test_my_leases_command_builds_action_card(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        create_machine(session, "machine-01")
+        handle_feishu_inbound_message(
+            session,
+            inbound(app, "om_lease_for_card", "/lease machine-01 60 debug"),
+        )
+
+        result = handle_feishu_inbound_message(
+            session,
+            inbound(app, "om_my_leases_card", "/my-leases"),
+        )
+
+        assert result.reply_card is not None
+        card_json = json.dumps(result.reply_card, ensure_ascii=False)
+        assert "我的租约" in card_json
+        assert "machine-01" in card_json
+        assert '"action": "confirm_extend"' in card_json
+        assert '"action": "confirm_release"' in card_json
+
+
+def test_card_extend_and_release_actions_require_confirmation(session_factory) -> None:
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        create_machine(session, "machine-01")
+        handle_feishu_inbound_message(
+            session,
+            inbound(app, "om_lease_for_actions", "/lease machine-01 60 debug"),
+        )
+        lease = session.scalar(select(ResourceLease))
+        assert lease is not None
+        original_expiry = lease.expires_at
+
+        extend_confirmation = handle_feishu_card_action(
+            session,
+            FeishuCardAction(
+                feishu_app_id=app.id,
+                operator_open_id="ou_user",
+                action_value={
+                    "action": "confirm_extend",
+                    "lease_id": lease.lease_id,
+                    "duration_minutes": 60,
+                },
+                raw_event={},
+            ),
+        )
+        assert lease.expires_at == original_expiry
+        assert extend_confirmation.reply_card is not None
+        assert '"action": "execute_extend"' in json.dumps(
+            extend_confirmation.reply_card, ensure_ascii=False
+        )
+
+        extended = handle_feishu_card_action(
+            session,
+            FeishuCardAction(
+                feishu_app_id=app.id,
+                operator_open_id="ou_user",
+                action_value={
+                    "action": "execute_extend",
+                    "lease_id": lease.lease_id,
+                    "duration_minutes": 60,
+                },
+                raw_event={},
+            ),
+        )
+        assert "延期成功" in (extended.reply_text or "")
+        assert lease.expires_at.replace(tzinfo=None) > original_expiry.replace(tzinfo=None)
+
+        release_confirmation = handle_feishu_card_action(
+            session,
+            FeishuCardAction(
+                feishu_app_id=app.id,
+                operator_open_id="ou_user",
+                action_value={"action": "confirm_release", "lease_id": lease.lease_id},
+                raw_event={},
+            ),
+        )
+        assert lease.status == LeaseStatus.ACTIVE
+        assert release_confirmation.reply_card is not None
+        assert '"action": "execute_release"' in json.dumps(
+            release_confirmation.reply_card, ensure_ascii=False
+        )
+
+        released = handle_feishu_card_action(
+            session,
+            FeishuCardAction(
+                feishu_app_id=app.id,
+                operator_open_id="ou_user",
+                action_value={"action": "execute_release", "lease_id": lease.lease_id},
+                raw_event={},
+            ),
+        )
+        assert "释放成功" in (released.reply_text or "")
+        assert lease.status == LeaseStatus.RELEASED
 
 
 def test_bound_user_can_list_and_release_own_leases(session_factory) -> None:

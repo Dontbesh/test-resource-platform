@@ -217,7 +217,12 @@ def handle_card_action_event(context: FeishuWorkerContext, event: Any) -> dict:
         try:
             result = handle_feishu_card_action(session, action)
             session.commit()
-            return {"toast": {"type": "success", "content": result.reply_text or "操作完成"}}
+            response = {
+                "toast": {"type": "success", "content": result.reply_text or "操作完成"}
+            }
+            if result.reply_card is not None:
+                response["card"] = result.reply_card
+            return response
         except Exception:
             session.rollback()
             raise
@@ -256,6 +261,7 @@ def lark_event_to_inbound_message(feishu_app_id: int, event: Any) -> FeishuInbou
 
 def lark_event_to_card_action(feishu_app_id: int, event: Any) -> FeishuCardAction:
     raw_event = to_event_dict(event)
+    header = get_nested(event, "header")
     operator = get_nested(event, "event", "operator")
     action = get_nested(event, "event", "action")
     action_value = get_value(action, "value")
@@ -269,6 +275,7 @@ def lark_event_to_card_action(feishu_app_id: int, event: Any) -> FeishuCardActio
         operator_open_id=operator_open_id,
         action_value=action_value,
         raw_event=raw_event,
+        action_id=str(get_value(header, "event_id") or "") or None,
     )
 
 

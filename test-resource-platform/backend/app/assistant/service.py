@@ -1,3 +1,6 @@
+import json
+from dataclasses import dataclass, field
+
 from sqlalchemy.orm import Session
 
 from app.assistant.llm import LlmClient, LlmClientError
@@ -14,12 +17,24 @@ class AssistantError(Exception):
     pass
 
 
-def handle_assistant_message(
+@dataclass(frozen=True)
+class AssistantToolResult:
+    name: str
+    data: dict
+
+
+@dataclass(frozen=True)
+class AssistantMessageResult:
+    text: str
+    tool_results: tuple[AssistantToolResult, ...] = field(default_factory=tuple)
+
+
+def run_assistant_message(
     session: Session,
     user: User,
     text: str,
     client: LlmClient,
-) -> str:
+) -> AssistantMessageResult:
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -29,6 +44,7 @@ def handle_assistant_message(
         {"role": "user", "content": text},
     ]
 
+    tool_results: list[AssistantToolResult] = []
     for _ in range(3):
         try:
             assistant_message = client.complete(messages, ASSISTANT_TOOLS)
@@ -39,7 +55,10 @@ def handle_assistant_message(
         if not tool_calls:
             content = assistant_message.get("content")
             if isinstance(content, str) and content.strip():
-                return content.strip()
+                return AssistantMessageResult(
+                    text=content.strip(),
+                    tool_results=tuple(tool_results),
+                )
             raise AssistantError("LLM returned an empty assistant response.")
 
         for tool_call in tool_calls:
@@ -51,8 +70,14 @@ def handle_assistant_message(
                     arguments_json=str(function.get("arguments") or "{}"),
                 )
                 tool_call_id = str(tool_call["id"])
+                parsed_result = json.loads(result)
             except (KeyError, TypeError, AssistantToolError) as exc:
                 raise AssistantError(str(exc)) from exc
+            except json.JSONDecodeError as exc:
+                raise AssistantError("Assistant tool returned invalid JSON.") from exc
+            tool_results.append(
+                AssistantToolResult(name=str(function["name"]), data=parsed_result)
+            )
             messages.append(
                 {
                     "role": "tool",
@@ -62,3 +87,12 @@ def handle_assistant_message(
             )
 
     raise AssistantError("LLM tool call limit exceeded.")
+
+
+def handle_assistant_message(
+    session: Session,
+    user: User,
+    text: str,
+    client: LlmClient,
+) -> str:
+    return run_assistant_message(session, user, text, client).text

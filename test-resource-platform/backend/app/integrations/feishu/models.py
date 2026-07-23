@@ -200,3 +200,34 @@ class FeishuMessageEvent(Base):
     )
 
     feishu_app: Mapped[FeishuApp] = relationship()
+
+
+class FeishuCardActionEvent(Base):
+    __tablename__ = "feishu_card_action_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "feishu_app_id",
+            "action_event_id",
+            name="uq_feishu_card_action_events_app_event",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feishu_app_id: Mapped[int] = mapped_column(
+        ForeignKey("feishu_apps.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    action_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    operator_open_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    action_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_event_json: Mapped[str] = mapped_column(Text, nullable=False)
+    reply_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reply_card_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    feishu_app: Mapped[FeishuApp] = relationship()

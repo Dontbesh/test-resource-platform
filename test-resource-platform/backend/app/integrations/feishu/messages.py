@@ -1,15 +1,24 @@
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.assistant.llm import LlmClientError, create_llm_client
-from app.assistant.service import AssistantError, handle_assistant_message
+from app.assistant.service import AssistantError, run_assistant_message
 from app.core.config import get_settings
 from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
-from app.integrations.feishu.cards import build_free_machines_card
+from app.integrations.feishu.cards import (
+    build_confirmation_card,
+    build_free_machines_card,
+    build_home_card,
+    build_machines_card,
+    build_my_leases_card,
+    build_operation_result_card,
+)
 from app.integrations.feishu.client import (
     FeishuClientError,
     send_feishu_card_reply,
@@ -18,6 +27,7 @@ from app.integrations.feishu.client import (
 from app.integrations.feishu.models import (
     FeishuApp,
     FeishuBindingCode,
+    FeishuCardActionEvent,
     FeishuMessageEvent,
     FeishuMessageHandledStatus,
     FeishuUserBinding,
@@ -49,6 +59,25 @@ class FeishuMessageDispatchError(Exception):
     pass
 
 
+class FeishuCardActionValue(BaseModel):
+    action: Literal[
+        "show_free_machines",
+        "show_machines",
+        "show_my_leases",
+        "confirm_lease",
+        "execute_lease",
+        "confirm_extend",
+        "execute_extend",
+        "confirm_release",
+        "execute_release",
+        "cancel",
+    ]
+    resource_code: str | None = Field(default=None, max_length=128)
+    lease_id: str | None = Field(default=None, max_length=64)
+    duration_minutes: int = Field(default=60, ge=1, le=10080)
+    purpose: str = Field(default="feishu-card", min_length=1, max_length=500)
+
+
 @dataclass(frozen=True)
 class FeishuInboundMessage:
     feishu_app_id: int
@@ -66,6 +95,7 @@ class FeishuCardAction:
     operator_open_id: str
     action_value: dict
     raw_event: dict
+    action_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,20 +164,62 @@ def handle_feishu_card_action(
     session: Session,
     action: FeishuCardAction,
 ) -> FeishuMessageResult:
-    action_name = str(action.action_value.get("action") or "")
-    if action_name != "lease":
+    if action.action_id:
+        existing = session.scalar(
+            select(FeishuCardActionEvent).where(
+                FeishuCardActionEvent.feishu_app_id == action.feishu_app_id,
+                FeishuCardActionEvent.action_event_id == action.action_id,
+            )
+        )
+        if existing is not None:
+            reply_card = (
+                json.loads(existing.reply_card_json)
+                if existing.reply_card_json is not None
+                else None
+            )
+            return FeishuMessageResult(
+                reply_text=existing.reply_text,
+                duplicate=True,
+                reply_card=reply_card,
+            )
+
+    result = execute_feishu_card_action(session, action)
+    if action.action_id:
+        session.add(
+            FeishuCardActionEvent(
+                feishu_app_id=action.feishu_app_id,
+                action_event_id=action.action_id,
+                operator_open_id=action.operator_open_id,
+                action_name=str(action.action_value.get("action") or ""),
+                raw_event_json=json.dumps(action.raw_event, ensure_ascii=False),
+                reply_text=result.reply_text,
+                reply_card_json=(
+                    json.dumps(result.reply_card, ensure_ascii=False)
+                    if result.reply_card is not None
+                    else None
+                ),
+            )
+        )
+        session.flush()
+    return result
+
+
+def execute_feishu_card_action(
+    session: Session,
+    action: FeishuCardAction,
+) -> FeishuMessageResult:
+    try:
+        value = FeishuCardActionValue.model_validate(action.action_value)
+    except ValidationError:
         return FeishuMessageResult(reply_text="暂不支持该卡片操作。", duplicate=False)
 
-    resource_code = str(action.action_value.get("resource_code") or "")
-    duration_minutes = int(action.action_value.get("duration_minutes") or 60)
-    purpose = str(action.action_value.get("purpose") or "feishu-card")
     inbound = FeishuInboundMessage(
         feishu_app_id=action.feishu_app_id,
         message_id="card-action",
         chat_id="card-action",
         sender_open_id=action.operator_open_id,
         message_type="interactive",
-        text=f"/lease {resource_code} {duration_minutes} {purpose}",
+        text="",
         raw_event=action.raw_event,
     )
     user = bound_platform_user(session, inbound)
@@ -156,7 +228,120 @@ def handle_feishu_card_action(
             reply_text="请先绑定平台用户后再操作资源。可以先发送 /whoami 查看当前飞书 open_id。",
             duplicate=False,
         )
-    return FeishuMessageResult(reply_text=lease_text(session, inbound, user), duplicate=False)
+
+    if value.action in {"cancel"}:
+        return FeishuMessageResult(
+            reply_text="已取消操作。",
+            duplicate=False,
+            reply_card=build_home_card(user),
+        )
+    if value.action == "show_free_machines":
+        return FeishuMessageResult(
+            reply_text="空闲机器",
+            duplicate=False,
+            reply_card=build_free_machines_card(session),
+        )
+    if value.action == "show_machines":
+        return FeishuMessageResult(
+            reply_text="机器列表",
+            duplicate=False,
+            reply_card=build_machines_card(session),
+        )
+    if value.action == "show_my_leases":
+        return FeishuMessageResult(
+            reply_text="我的租约",
+            duplicate=False,
+            reply_card=build_my_leases_card(session, user),
+        )
+    if value.action == "confirm_lease" and value.resource_code:
+        text = (
+            f"确认占用机器 **{value.resource_code}** {value.duration_minutes} 分钟？\n"
+            f"用途：{value.purpose}"
+        )
+        return FeishuMessageResult(
+            reply_text=f"请确认占用 {value.resource_code}。",
+            duplicate=False,
+            reply_card=build_confirmation_card(
+                action="execute_lease",
+                title="确认占用",
+                content=text,
+                confirm_label="确认占用",
+                resource_code=value.resource_code,
+                duration_minutes=value.duration_minutes,
+                purpose=value.purpose,
+            ),
+        )
+    if value.action == "confirm_extend" and value.lease_id:
+        return FeishuMessageResult(
+            reply_text=f"请确认延期租约 {value.lease_id}。",
+            duplicate=False,
+            reply_card=build_confirmation_card(
+                action="execute_extend",
+                title="确认延期",
+                content=(
+                    f"确认将租约 **{value.lease_id}** 延期 "
+                    f"{value.duration_minutes} 分钟？"
+                ),
+                confirm_label="确认延期",
+                lease_id=value.lease_id,
+                duration_minutes=value.duration_minutes,
+            ),
+        )
+    if value.action == "confirm_release" and value.lease_id:
+        return FeishuMessageResult(
+            reply_text=f"请确认释放租约 {value.lease_id}。",
+            duplicate=False,
+            reply_card=build_confirmation_card(
+                action="execute_release",
+                title="确认释放",
+                content=f"释放租约 **{value.lease_id}** 后，机器将立即回到空闲状态。",
+                confirm_label="确认释放",
+                danger=True,
+                lease_id=value.lease_id,
+            ),
+        )
+
+    command = card_action_command(value)
+    if command is None:
+        return FeishuMessageResult(reply_text="卡片参数不完整，请重新打开卡片。", duplicate=False)
+    inbound = FeishuInboundMessage(
+        feishu_app_id=action.feishu_app_id,
+        message_id="card-action",
+        chat_id="card-action",
+        sender_open_id=action.operator_open_id,
+        message_type="interactive",
+        text=command,
+        raw_event=action.raw_event,
+    )
+    if value.action == "execute_lease":
+        reply_text = lease_text(session, inbound, user)
+    elif value.action == "execute_extend":
+        reply_text = extend_text(session, command.split(), user)
+    else:
+        reply_text = release_text(session, command.split(), user)
+    success = "成功" in reply_text
+    return FeishuMessageResult(
+        reply_text=reply_text,
+        duplicate=False,
+        reply_card=build_operation_result_card(
+            "操作成功" if success else "操作失败",
+            reply_text,
+            success=success,
+        ),
+    )
+
+
+def card_action_command(value: FeishuCardActionValue) -> str | None:
+    if value.action == "execute_lease" and value.resource_code:
+        return (
+            f"/lease {value.resource_code} {value.duration_minutes} "
+            f"{value.purpose}"
+        )
+    if value.action == "execute_extend" and value.lease_id:
+        return f"/extend {value.lease_id} {value.duration_minutes}"
+    if value.action == "execute_release" and value.lease_id:
+        return f"/release {value.lease_id}"
+    return None
 
 
 def handle_feishu_inbound_message(
@@ -176,8 +361,7 @@ def handle_feishu_inbound_message(
     if existing is not None:
         return FeishuMessageResult(reply_text=None, duplicate=True)
 
-    reply_text = build_reply_text(session, inbound)
-    reply_card = build_reply_card(session, inbound)
+    reply_text, reply_card = build_reply(session, inbound)
     event = FeishuMessageEvent(
         feishu_app_id=inbound.feishu_app_id,
         message_id=inbound.message_id,
@@ -191,6 +375,65 @@ def handle_feishu_inbound_message(
     session.add(event)
     session.flush()
     return FeishuMessageResult(reply_text=reply_text, duplicate=False, reply_card=reply_card)
+
+
+def build_reply(session: Session, inbound: FeishuInboundMessage) -> tuple[str, dict | None]:
+    command = inbound.text.strip().split(maxsplit=1)[0].lower() if inbound.text.strip() else ""
+    deterministic_commands = {
+        "/help",
+        "/whoami",
+        "/bind",
+        "/machines",
+        "/lease",
+        "/my-leases",
+        "/release",
+        "/extend",
+    }
+    if command in deterministic_commands:
+        return build_reply_text(session, inbound), build_reply_card(session, inbound)
+
+    user = bound_platform_user(session, inbound)
+    if user is None:
+        return (
+            "请先绑定平台用户后再使用资源助手。可以先发送 /whoami 查看当前飞书 open_id。",
+            None,
+        )
+    settings = get_settings()
+    if not settings.llm_api_key or not settings.llm_model:
+        return (
+            "LLM 资源助手尚未配置，确定性快捷命令仍可正常使用。\n\n" + help_text(),
+            build_home_card(user),
+        )
+    try:
+        result = run_assistant_message(
+            session=session,
+            user=user,
+            text=inbound.text.strip(),
+            client=create_llm_client(settings),
+        )
+    except (AssistantError, LlmClientError):
+        return "LLM 资源助手暂时不可用，请稍后重试；确定性快捷命令仍可正常使用。", None
+
+    for tool_result in reversed(result.tool_results):
+        if tool_result.name != "search_machines":
+            continue
+        machines = tool_result.data.get("machines")
+        if not isinstance(machines, list):
+            continue
+        resource_codes = {
+            str(machine.get("resource_code"))
+            for machine in machines
+            if isinstance(machine, dict) and machine.get("resource_code")
+        }
+        return (
+            result.text,
+            build_machines_card(
+                session,
+                resource_codes=resource_codes,
+                title="智能匹配结果",
+            ),
+        )
+    return result.text, None
 
 
 def mark_message_event_error(session: Session, inbound: FeishuInboundMessage, error: str) -> None:
@@ -235,26 +478,24 @@ def build_reply_text(session: Session, inbound: FeishuInboundMessage) -> str:
     user = bound_platform_user(session, inbound)
     if user is None:
         return "请先绑定平台用户后再使用资源助手。可以先发送 /whoami 查看当前飞书 open_id。"
-    settings = get_settings()
-    if not settings.llm_api_key or not settings.llm_model:
-        return "LLM 资源助手尚未配置，确定性快捷命令仍可正常使用。\n\n" + help_text()
-    try:
-        return handle_assistant_message(
-            session=session,
-            user=user,
-            text=text,
-            client=create_llm_client(settings),
-        )
-    except (AssistantError, LlmClientError):
-        return "LLM 资源助手暂时不可用，请稍后重试；确定性快捷命令仍可正常使用。"
+    return "无法识别该快捷命令。"
 
 
 def build_reply_card(session: Session, inbound: FeishuInboundMessage) -> dict | None:
     parts = inbound.text.strip().split()
-    if len(parts) > 1 and parts[0].lower() == "/machines" and parts[1].lower() == "free":
-        if bound_platform_user(session, inbound) is None:
-            return None
-        return build_free_machines_card(session)
+    command = parts[0].lower() if parts else ""
+    user = bound_platform_user(session, inbound)
+    if command == "/help":
+        return build_home_card(user)
+    if user is None:
+        return None
+    if command == "/machines":
+        return build_machines_card(
+            session,
+            only_free=len(parts) > 1 and parts[1].lower() == "free",
+        )
+    if command == "/my-leases":
+        return build_my_leases_card(session, user)
     return None
 
 

@@ -27,6 +27,7 @@ def test_lark_message_event_is_converted_to_inbound_message() -> None:
 
 def test_lark_card_action_event_is_converted_to_card_action() -> None:
     event = {
+        "header": {"event_id": "evt_card_01"},
         "event": {
             "operator": {"open_id": "ou_user"},
             "action": {
@@ -45,4 +46,5 @@ def test_lark_card_action_event_is_converted_to_card_action() -> None:
     assert action.operator_open_id == "ou_user"
     assert action.action_value["action"] == "lease"
     assert action.action_value["resource_code"] == "machine-01"
+    assert action.action_id == "evt_card_01"
     assert action.raw_event == event
