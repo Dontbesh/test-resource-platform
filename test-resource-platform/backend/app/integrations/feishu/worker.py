@@ -207,7 +207,11 @@ def build_lark_event_handler(lark, context: FeishuWorkerContext):
     builder = register(handle_message)
     card_register = getattr(builder, "register_p2_card_action_trigger", None)
     if callable(card_register):
-        builder = card_register(lambda event: handle_card_action_event(context, event))
+        def handle_card_action(event):
+            payload = handle_card_action_event(context, event)
+            return create_lark_card_action_response(payload)
+
+        builder = card_register(handle_card_action)
     return builder.build()
 
 
@@ -221,11 +225,21 @@ def handle_card_action_event(context: FeishuWorkerContext, event: Any) -> dict:
                 "toast": {"type": "success", "content": result.reply_text or "操作完成"}
             }
             if result.reply_card is not None:
-                response["card"] = result.reply_card
+                response["card"] = {"type": "raw", "data": result.reply_card}
             return response
         except Exception:
             session.rollback()
             raise
+
+
+def create_lark_card_action_response(payload: dict):
+    try:
+        from lark_oapi.event.callback.model.p2_card_action_trigger import (  # type: ignore[import-not-found]
+            P2CardActionTriggerResponse,
+        )
+    except ImportError as exc:
+        raise RuntimeError("Feishu card action response model is unavailable.") from exc
+    return P2CardActionTriggerResponse(payload)
 
 
 def create_lark_ws_client(lark, app_id: str, app_secret: str, event_handler):
