@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.bootstrap.admin import ensure_database_schema, ensure_initial_admin
 from app.core.config import get_settings
 from app.credentials.crypto import CredentialCipher
 from app.db.session import get_engine, get_session_factory
@@ -15,6 +16,7 @@ from app.integrations.feishu.models import (
     FeishuSetupStatus,
     FeishuUserBinding,
 )
+from app.integrations.feishu.worker import FeishuWorkerState, feishu_worker_manager
 from app.main import create_app
 
 TEST_FERNET_KEY = "P4hnnBWP4qB-txrlIG20aQRk0RxEholITHKAcC3atkY="
@@ -50,6 +52,58 @@ def create_user(client: TestClient, username: str, password: str, role: str) -> 
         json={"username": username, "password": password, "role": role},
     )
     assert response.status_code == 201
+
+
+def test_app_lifespan_restores_and_stops_saved_feishu_worker(monkeypatch, tmp_path) -> None:
+    database_path = tmp_path / "feishu_restore.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{database_path}")
+    monkeypatch.setenv("SESSION_SECRET_KEY", "test-secret")
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", TEST_FERNET_KEY)
+    monkeypatch.setenv("AUTO_CREATE_SCHEMA", "true")
+    monkeypatch.setenv("INITIAL_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "Admin@123456")
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    get_session_factory.cache_clear()
+    settings = get_settings()
+    ensure_database_schema(settings)
+    session_factory = get_session_factory(settings.database_url)
+    with session_factory() as session:
+        ensure_initial_admin(session, settings)
+        app = FeishuApp(
+            name="lab assistant",
+            platform_type="FEISHU",
+            app_id="cli_restore",
+            encrypted_app_secret=CredentialCipher(TEST_FERNET_KEY).encrypt("sec_restore") or "",
+            created_by_user_id=1,
+        )
+        session.add(app)
+        session.commit()
+        app_id = app.id
+
+    events: list[tuple[str, str]] = []
+
+    class FakeRuntime:
+        def start(self) -> None:
+            events.append(("start", "cli_restore"))
+
+        def stop(self) -> None:
+            events.append(("stop", "cli_restore"))
+
+    feishu_worker_manager.stop_all()
+    monkeypatch.setattr(
+        feishu_worker_manager,
+        "runtime_factory",
+        lambda context: FakeRuntime(),
+    )
+
+    with TestClient(create_app()):
+        status = feishu_worker_manager.status(app_id)
+        assert status.state == FeishuWorkerState.RUNNING
+        assert events == [("start", "cli_restore")]
+
+    assert feishu_worker_manager.status(app_id).state == FeishuWorkerState.STOPPED
+    assert events == [("start", "cli_restore"), ("stop", "cli_restore")]
 
 
 def test_admin_can_begin_feishu_setup_and_persist_session(client, monkeypatch) -> None:
@@ -197,6 +251,38 @@ def test_save_feishu_app_encrypts_secret_and_list_does_not_expose_it(client) -> 
         assert app is not None
         assert app.encrypted_app_secret != "sec_saved"
         assert "sec_saved" not in app.encrypted_app_secret
+
+
+def test_save_feishu_app_starts_worker_automatically(client, monkeypatch) -> None:
+    events: list[tuple[str, str]] = []
+
+    class FakeRuntime:
+        def start(self) -> None:
+            events.append(("start", "cli_auto_start"))
+
+        def stop(self) -> None:
+            events.append(("stop", "cli_auto_start"))
+
+    monkeypatch.setattr(
+        feishu_worker_manager,
+        "runtime_factory",
+        lambda context: FakeRuntime(),
+    )
+    login(client, "admin", "Admin@123456")
+
+    response = client.post(
+        "/api/v1/integrations/feishu/setup/save",
+        json={
+            "name": "auto-start assistant",
+            "platform_type": "FEISHU",
+            "app_id": "cli_auto_start",
+            "app_secret": "sec_auto_start",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "CONNECTED"
+    assert events == [("start", "cli_auto_start")]
 
 
 def test_save_feishu_app_requires_encryption_key(monkeypatch, tmp_path) -> None:

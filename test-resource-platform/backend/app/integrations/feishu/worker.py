@@ -106,7 +106,7 @@ class FeishuWorkerManager:
     def stop(self, app_id: int) -> FeishuWorkerStatus:
         with self._lock:
             record = self._workers.pop(app_id, None)
-        if record is not None:
+        if record is not None and record.state == FeishuWorkerState.RUNNING:
             record.runtime.stop()
         return FeishuWorkerStatus(app_id=app_id, state=FeishuWorkerState.STOPPED)
 
@@ -126,7 +126,8 @@ class FeishuWorkerManager:
             records = list(self._workers.items())
             self._workers.clear()
         for _, record in records:
-            record.runtime.stop()
+            if record.state == FeishuWorkerState.RUNNING:
+                record.runtime.stop()
 
 
 class FeishuSdkWebSocketRuntime:

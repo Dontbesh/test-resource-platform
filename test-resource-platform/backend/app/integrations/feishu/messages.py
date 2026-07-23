@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.assistant.llm import LlmClientError, create_llm_client
+from app.assistant.service import AssistantError, handle_assistant_message
+from app.core.config import get_settings
 from app.credentials.crypto import CredentialCipher, CredentialDecryptionError
 from app.integrations.feishu.cards import build_free_machines_card
 from app.integrations.feishu.client import (
@@ -228,7 +231,22 @@ def build_reply_text(session: Session, inbound: FeishuInboundMessage) -> str:
             return release_text(session, parts, user)
         if command == "/extend":
             return extend_text(session, parts, user)
-    return "暂时只支持确定性快捷命令。\n\n" + help_text()
+
+    user = bound_platform_user(session, inbound)
+    if user is None:
+        return "请先绑定平台用户后再使用资源助手。可以先发送 /whoami 查看当前飞书 open_id。"
+    settings = get_settings()
+    if not settings.llm_api_key or not settings.llm_model:
+        return "LLM 资源助手尚未配置，确定性快捷命令仍可正常使用。\n\n" + help_text()
+    try:
+        return handle_assistant_message(
+            session=session,
+            user=user,
+            text=text,
+            client=create_llm_client(settings),
+        )
+    except (AssistantError, LlmClientError):
+        return "LLM 资源助手暂时不可用，请稍后重试；确定性快捷命令仍可正常使用。"
 
 
 def build_reply_card(session: Session, inbound: FeishuInboundMessage) -> dict | None:

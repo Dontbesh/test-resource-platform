@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    assistant,
     auth,
     connectivity_checks,
     feishu_integration,
@@ -12,6 +13,7 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
+api_router.include_router(assistant.router, tags=["assistant"])
 api_router.include_router(auth.router, tags=["auth"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(users.router, tags=["users"])

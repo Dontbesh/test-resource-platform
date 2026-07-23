@@ -91,12 +91,23 @@ def save_setup(
     session: Annotated[Session, Depends(get_db)],
 ) -> FeishuAppPublic:
     try:
+        settings = get_settings()
+        cipher = CredentialCipher(settings.credential_encryption_key)
         app = save_feishu_app(
             session=session,
             body=body,
             user=current_user,
-            cipher=CredentialCipher(get_settings().credential_encryption_key),
+            cipher=cipher,
         )
+        try:
+            app = start_feishu_app_worker(
+                session=session,
+                app_id=app.id,
+                cipher=cipher,
+                database_url=settings.database_url,
+            )
+        except FeishuWorkerError:
+            pass
         session.commit()
         return app
     except CredentialEncryptionKeyError:

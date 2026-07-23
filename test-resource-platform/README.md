@@ -111,6 +111,19 @@ CREDENTIAL_ENCRYPTION_KEY=<fernet-key>
 
 `.env.example` 中的值只用于本地开发示例，生产或共享测试环境必须替换。
 
+LLM 资源助手使用 OpenAI-compatible `/chat/completions` 接口，并要求模型支持
+tool/function calling。在服务器 `.env` 中填写：
+
+```text
+LLM_API_KEY=<api-key>
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=<model-name>
+LLM_TIMEOUT_SECONDS=30
+```
+
+`LLM_API_KEY` 和 `LLM_MODEL` 留空时，普通 Web 功能和飞书确定性命令仍可使用，
+助手接口会返回“尚未配置”。真实 Key 只保存在服务器 `.env`，不要提交到 Git。
+
 ## 后端测试
 
 在 `backend/` 目录安装依赖后运行：
@@ -142,7 +155,11 @@ npm run build
 
 登录用户可对机器执行按需连通性检查，首版检查 SSH 端口和 BMC HTTPS 端口。
 
-`ADMIN` / `TSE` 可从后台首页进入飞书接入页，参考 cc-connect 的扫码流程创建/绑定飞书应用，并将 `app_id/app_secret` 保存到平台数据库。`app_secret` 会使用 `CREDENTIAL_ENCRYPTION_KEY` 加密保存。当前版本只完成应用配置保存，尚未启动飞书 WebSocket 长连接，也尚未处理飞书消息命令。
+`ADMIN` / `TSE` 可从后台首页进入飞书接入页，参考 cc-connect 的扫码流程创建/绑定飞书应用，并将 `app_id/app_secret` 保存到平台数据库。`app_secret` 会使用 `CREDENTIAL_ENCRYPTION_KEY` 加密保存。平台启动时会自动恢复已保存应用的 WebSocket worker，新保存的应用也会自动连接；页面保留只读连接状态和错误信息。
+
+飞书已支持确定性资源命令、自助绑定和基础交互卡片。未命中快捷命令的自由文本会进入与 Web 共用的 LLM 资源助手。当前 LLM tracer 只开放白名单 `search_machines` 只读工具，可按机器类型、架构、操作系统、标签和占用状态查询；LLM 不直接访问数据库，也不能读取机器凭据。
+
+登录用户可从后台首页进入 `/assistant`，验证自然语言机器查询和完整 tool calling 链路。
 
 资源租约相关接口：
 
@@ -166,4 +183,8 @@ npm run build
 - `POST /api/v1/integrations/feishu/setup/save`
 - `GET /api/v1/integrations/feishu/apps`
 
-当前尚未包含 PAT 生命周期、CSV 导入、通用审计查询页面、飞书 WebSocket 长连接、飞书消息命令处理、真实远程命令执行和 IPMI/Redfish 电源操作。
+助手接口：
+
+- `POST /api/v1/assistant/messages`
+
+当前尚未包含 PAT 生命周期、CSV 导入、通用审计查询页面、LLM 写操作草案、详细硬件字段查询、真实远程命令执行和 IPMI/Redfish 电源操作。

@@ -16,6 +16,10 @@ class Settings:
     initial_admin_password: str
     auto_create_schema: bool
     credential_encryption_key: str | None
+    llm_api_key: str | None
+    llm_base_url: str
+    llm_model: str | None
+    llm_timeout_seconds: float
 
 
 @lru_cache
@@ -35,4 +39,8 @@ def get_settings() -> Settings:
         initial_admin_password=getenv("INITIAL_ADMIN_PASSWORD", "Admin@123456"),
         auto_create_schema=getenv("AUTO_CREATE_SCHEMA", "false").lower() == "true",
         credential_encryption_key=getenv("CREDENTIAL_ENCRYPTION_KEY"),
+        llm_api_key=getenv("LLM_API_KEY"),
+        llm_base_url=getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+        llm_model=getenv("LLM_MODEL"),
+        llm_timeout_seconds=float(getenv("LLM_TIMEOUT_SECONDS", "30")),
     )

@@ -119,6 +119,56 @@ def test_help_message_records_event_and_replies(session_factory) -> None:
         }
 
 
+def test_unmatched_bound_message_uses_shared_llm_assistant(
+    session_factory, monkeypatch
+) -> None:
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "tool-model")
+    get_settings.cache_clear()
+
+    class FakeLlmClient:
+        call_count = 0
+
+        def complete(self, messages: list[dict], tools: list[dict]) -> dict:
+            self.call_count += 1
+            if self.call_count == 1:
+                return {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-feishu-search",
+                            "type": "function",
+                            "function": {
+                                "name": "search_machines",
+                                "arguments": '{"architecture":"x86_64"}',
+                            },
+                        }
+                    ],
+                }
+            assert "server-feishu-x86" in messages[-1]["content"]
+            return {"role": "assistant", "content": "飞书中找到 server-feishu-x86。"}
+
+    monkeypatch.setattr(
+        "app.integrations.feishu.messages.create_llm_client",
+        lambda settings: FakeLlmClient(),
+        raising=False,
+    )
+
+    with session_factory() as session:
+        app = create_feishu_app(session)
+        bind_open_id(session, app)
+        machine = create_machine(session, "server-feishu-x86")
+        machine.architecture = "x86_64"
+
+        result = handle_feishu_inbound_message(
+            session,
+            inbound(app, "om_llm_search", "帮我找一台 x86 机器"),
+        )
+
+        assert result.reply_text == "飞书中找到 server-feishu-x86。"
+
+
 def test_message_id_is_deduplicated(session_factory) -> None:
     with session_factory() as session:
         app = create_feishu_app(session)

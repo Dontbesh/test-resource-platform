@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
+import AssistantView from '@/views/AssistantView.vue';
 import DashboardView from '@/views/DashboardView.vue';
 import FeishuIntegrationView from '@/views/FeishuIntegrationView.vue';
 import HealthView from '@/views/HealthView.vue';
@@ -31,6 +32,12 @@ const router = createRouter({
       path: '/resources',
       name: 'resources',
       component: ResourceInventoryView,
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/assistant',
+      name: 'assistant',
+      component: AssistantView,
       meta: { requiresAuth: true }
     },
     {

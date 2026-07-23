@@ -223,6 +223,25 @@ def list_feishu_apps(session: Session) -> list[FeishuApp]:
     return list(session.scalars(select(FeishuApp).order_by(FeishuApp.id)))
 
 
+def restore_feishu_app_workers(
+    session: Session,
+    cipher: CredentialCipher,
+    database_url: str,
+    manager: FeishuWorkerManager = feishu_worker_manager,
+) -> None:
+    for app in list_feishu_apps(session):
+        try:
+            start_feishu_app_worker(
+                session=session,
+                app_id=app.id,
+                cipher=cipher,
+                database_url=database_url,
+                manager=manager,
+            )
+        except FeishuWorkerError:
+            continue
+
+
 def create_feishu_binding_code(session: Session, user: User) -> FeishuBindingCode:
     for _ in range(5):
         code = generate_binding_code()

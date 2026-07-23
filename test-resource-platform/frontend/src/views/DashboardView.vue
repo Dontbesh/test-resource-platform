@@ -7,6 +7,12 @@
           <h1>后台首页</h1>
         </div>
         <n-space align="center">
+          <n-button secondary @click="router.push('/assistant')">
+            <template #icon>
+              <n-icon><Bot24Regular /></n-icon>
+            </template>
+            资源助手
+          </n-button>
           <n-button secondary @click="router.push('/resources')">
             <template #icon>
               <n-icon><Server24Regular /></n-icon>
@@ -39,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { People24Regular, PlugConnected24Regular, Server24Regular } from '@vicons/fluent';
+import { Bot24Regular, People24Regular, PlugConnected24Regular, Server24Regular } from '@vicons/fluent';
 import { useRouter } from 'vue-router';
 
 import { useAuthStore } from '@/stores/auth';

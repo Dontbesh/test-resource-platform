@@ -73,7 +73,7 @@
             {{ error }}
           </n-alert>
           <n-alert v-if="savedApp" type="success" title="应用已保存" class="status-alert">
-            {{ savedApp.name }} 已保存，可以在右侧启动 WebSocket worker 接收飞书消息。
+            {{ savedApp.name }} 已保存，平台正在自动连接飞书消息通道。
           </n-alert>
         </section>
 
@@ -81,7 +81,7 @@
           <div class="panel-header">
             <div>
               <h2>已配置应用</h2>
-              <p>保存应用后，可以启动或停止该应用的 WebSocket worker。</p>
+              <p>平台启动时会自动连接已保存的应用，此处展示连接状态和错误信息。</p>
             </div>
             <n-button secondary :loading="loadingApps" @click="loadApps">刷新</n-button>
           </div>
@@ -140,8 +140,6 @@ import {
   listFeishuUserBindings,
   pollFeishuSetup,
   saveFeishuSetup,
-  startFeishuAppWorker,
-  stopFeishuAppWorker,
   type FeishuBindingCodePublic,
   type FeishuAppPublic,
   type FeishuSetupBeginResponse,
@@ -168,8 +166,6 @@ const savedApp = ref<FeishuAppPublic | null>(null);
 const apps = ref<FeishuAppPublic[]>([]);
 const loadingApps = ref(false);
 const checkingAppIds = ref(new Set<number>());
-const startingWorkerIds = ref(new Set<number>());
-const stoppingWorkerIds = ref(new Set<number>());
 const selectedAppId = ref<number | null>(null);
 const bindings = ref<FeishuUserBindingPublic[]>([]);
 const loadingBindings = ref(false);
@@ -249,6 +245,20 @@ const columns: DataTableColumns<FeishuAppPublic> = [
     }
   },
   {
+    title: '最后连接',
+    key: 'last_connected_at',
+    render(row) {
+      return row.last_connected_at ? formatDateTime(row.last_connected_at) : '-';
+    }
+  },
+  {
+    title: '错误',
+    key: 'last_error',
+    render(row) {
+      return row.last_error ?? '-';
+    }
+  },
+  {
     title: '创建时间',
     key: 'created_at',
     render(row) {
@@ -258,7 +268,7 @@ const columns: DataTableColumns<FeishuAppPublic> = [
   {
     title: '操作',
     key: 'actions',
-    width: 250,
+    width: 110,
     render(row) {
       return renderAppActions(row);
     }
@@ -267,42 +277,14 @@ const columns: DataTableColumns<FeishuAppPublic> = [
 
 function renderAppActions(row: FeishuAppPublic) {
   return h(
-    'div',
-    { class: 'app-actions' },
-    [
-      h(
-        NButton,
-        {
-          size: 'small',
-          secondary: true,
-          loading: checkingAppIds.value.has(row.id),
-          onClick: () => checkConnection(row.id)
-        },
-        { default: () => '检查连接' }
-      ),
-      h(
-        NButton,
-        {
-          size: 'small',
-          type: 'primary',
-          secondary: true,
-          loading: startingWorkerIds.value.has(row.id),
-          onClick: () => startWorker(row.id)
-        },
-        { default: () => '启动' }
-      ),
-      h(
-        NButton,
-        {
-          size: 'small',
-          secondary: true,
-          disabled: row.status !== 'CONNECTED',
-          loading: stoppingWorkerIds.value.has(row.id),
-          onClick: () => stopWorker(row.id)
-        },
-        { default: () => '停止' }
-      )
-    ]
+    NButton,
+    {
+      size: 'small',
+      secondary: true,
+      loading: checkingAppIds.value.has(row.id),
+      onClick: () => checkConnection(row.id)
+    },
+    { default: () => '检查连接' }
   );
 }
 
@@ -529,38 +511,6 @@ async function generateBindingCode() {
     message.error(err instanceof Error ? err.message : '生成飞书绑定码失败');
   } finally {
     generatingBindingCode.value = false;
-  }
-}
-
-async function startWorker(appId: number) {
-  startingWorkerIds.value = new Set(startingWorkerIds.value).add(appId);
-  try {
-    const updated = await startFeishuAppWorker(appId);
-    apps.value = apps.value.map((app) => (app.id === appId ? updated : app));
-    message.success('飞书 WebSocket worker 已启动');
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : '飞书 WebSocket worker 启动失败');
-    await loadApps();
-  } finally {
-    const next = new Set(startingWorkerIds.value);
-    next.delete(appId);
-    startingWorkerIds.value = next;
-  }
-}
-
-async function stopWorker(appId: number) {
-  stoppingWorkerIds.value = new Set(stoppingWorkerIds.value).add(appId);
-  try {
-    const updated = await stopFeishuAppWorker(appId);
-    apps.value = apps.value.map((app) => (app.id === appId ? updated : app));
-    message.success('飞书 WebSocket worker 已停止');
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : '飞书 WebSocket worker 停止失败');
-    await loadApps();
-  } finally {
-    const next = new Set(stoppingWorkerIds.value);
-    next.delete(appId);
-    stoppingWorkerIds.value = next;
   }
 }
 
